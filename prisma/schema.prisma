@@ -56,35 +56,9 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  orders   Order[]
-  sessions AuthSession[]
+  orders Order[]
 
   @@map("users")
-}
-
-model AuthSession {
-  id        String         @id @default(uuid()) @db.Char(36)
-  userId    Int            @map("user_id")
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime       @map("expires_at")
-  revokedAt DateTime?      @map("revoked_at")
-  createdAt DateTime       @default(now()) @map("created_at")
-  tokens    RefreshToken[]
-
-  @@index([userId])
-  @@index([expiresAt])
-  @@map("auth_sessions")
-}
-
-model RefreshToken {
-  digest     String      @id @db.Char(64)
-  sessionId  String      @map("session_id") @db.Char(36)
-  session    AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  consumedAt DateTime?   @map("consumed_at")
-  createdAt  DateTime    @default(now()) @map("created_at")
-
-  @@index([sessionId])
-  @@map("refresh_tokens")
 }
 
 // =========================
@@ -130,15 +104,19 @@ model Category {
 // =========================
 
 model Product {
-  id          Int     @id @default(autoincrement())
-  name        String  @db.VarChar(150)
-  description String? @db.Text
-  imageUrl    String? @map("image_url") @db.VarChar(500)
-  price       Decimal @db.Decimal(12, 2)
-  isAvailable Boolean @default(true) @map("is_available")
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(150)
+  description String?  @db.Text
+  imageUrl    String?  @map("image_url") @db.VarChar(500)
+  price       Decimal  @db.Decimal(12, 2)
+  isAvailable Boolean  @default(true) @map("is_available")
 
   categoryId Int?      @map("category_id")
-  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  category   Category? @relation(
+    fields: [categoryId],
+    references: [id],
+    onDelete: SetNull
+  )
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -170,7 +148,11 @@ model Order {
 
   // Cashier
   cashierId Int  @map("cashier_id")
-  cashier   User @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  cashier   User @relation(
+    fields: [cashierId],
+    references: [id],
+    onDelete: Restrict
+  )
 
   // Receipt snapshots
   receiptCafeName    String? @map("receipt_cafe_name") @db.VarChar(150)
@@ -183,8 +165,8 @@ model Order {
   updatedAt   DateTime  @updatedAt @map("updated_at")
   completedAt DateTime? @map("completed_at")
 
-  items    OrderItem[]
-  payments Payment[]
+  items   OrderItem[]
+  payment Payment?
 
   @@index([cashierId])
   @@index([status, createdAt])
@@ -199,10 +181,18 @@ model OrderItem {
   id Int @id @default(autoincrement())
 
   orderId Int   @map("order_id")
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   Order @relation(
+    fields: [orderId],
+    references: [id],
+    onDelete: Cascade
+  )
 
   productId Int?     @map("product_id")
-  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  product   Product? @relation(
+    fields: [productId],
+    references: [id],
+    onDelete: SetNull
+  )
 
   // Product snapshot
   productName String  @map("product_name") @db.VarChar(150)
@@ -219,12 +209,17 @@ model OrderItem {
 // PAYMENTS
 // =========================
 
+
 model Payment {
   id Int @id @default(autoincrement())
 
   // Order relationship
-  orderId Int   @map("order_id")
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderId Int @map("order_id")
+  order   Order @relation(
+    fields: [orderId],
+    references: [id],
+    onDelete: Restrict
+  )
 
   attemptNumber Int @default(1) @map("attempt_number")
 
@@ -246,16 +241,16 @@ model Payment {
   midtransStatus String? @map("midtrans_status") @db.VarChar(30)
 
   // QRIS payment
-  qrisQrUrl   String? @map("qris_qr_url") @db.Text
+  qrisQrUrl String? @map("qris_qr_url") @db.Text
   qrisPayload String? @map("qris_payload") @db.Text
 
   // Optional: Midtrans Snap
-  snapToken       String? @map("snap_token") @db.Text
+  snapToken String? @map("snap_token") @db.Text
   snapRedirectUrl String? @map("snap_redirect_url") @db.Text
 
   // Timestamps
   expiresAt DateTime? @map("expires_at")
-  paidAt    DateTime? @map("paid_at")
+  paidAt DateTime? @map("paid_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
