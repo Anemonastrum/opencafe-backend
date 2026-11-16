@@ -1,0 +1,31 @@
+{
+  "name": "opencafe-backend",
+  "version": "1.0.0",
+  "description": "Open-source customizable cafe point of sales (POS)",
+  "homepage": "https://github.com/Anemonastrum/opencafe-backend#readme",
+  "bugs": {
+    "url": "https://github.com/Anemonastrum/opencafe-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anemonastrum/opencafe-backend.git"
+  },
+  "license": "MIT",
+  "author": "Anemonastrum",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "prisma skills sync || exit 0"
+  },
+  "dependencies": {
+    "@prisma/adapter-mariadb": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "prisma": "^7.10.1"
+  }
+}
