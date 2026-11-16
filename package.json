@@ -17,7 +17,7 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "start": "tsx src/server.js",
-    "test:integration": "tsx --test --test-concurrency=1 tests/auth-db.integration.js",
+    "test:integration": "tsx --test --test-concurrency=1 tests/*.integration.js",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
