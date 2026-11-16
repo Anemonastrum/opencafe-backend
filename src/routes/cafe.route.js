@@ -4,7 +4,7 @@ import {
   getCafeSetting,
   updateCafeSetting,
   deleteCafeSetting,
-} from '../controllers/cafeSetting.js';
+} from '../controllers/cafe.controller.js';
 
 const router = express.Router();
 

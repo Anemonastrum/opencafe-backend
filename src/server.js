@@ -2,9 +2,8 @@ import 'dotenv/config';
 import { app } from './app.js';
 import { prisma } from './configs/prisma.js';
 
-const PORT = Number(process.env.PORT || 3000);
-// auth belum ada, pakai localhost dulu
-const HOST = process.env.HOST || '127.0.0.1';
+const PORT = process.env.PORT;
+const HOST = process.env.HOST;
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`Starting Server on http://${HOST}:${server.address().port}`);
