@@ -1,5 +1,6 @@
 export function errorHandler(error, req, res, next) {
   if (res.headersSent) return next(error);
+  if (error.code === 'INVALID_UTF8') return res.status(400).json({ error: { code: 'INVALID_UTF8' } });
   if (error.code === 'P2002') return res.status(409).json({ error: { code: 'USERNAME_EXISTS' } });
   if (['entity.parse.failed', 'entity.too.large'].includes(error.type)) return res.status(400).json({ error: { code: 'INVALID_INPUT' } });
   const safe = Number.isInteger(error.status) && error.status >= 400 && error.status < 500 && /^[A-Z_]+$/.test(error.code);

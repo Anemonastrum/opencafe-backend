@@ -45,6 +45,14 @@ test('configuration fails closed for secret and origin problems', () => {
   assert.throws(() => loadConfig({ ...env, PORT: 'abc' }));
 });
 
+test('malformed Unicode strings cannot alias a different password', async () => {
+  const password = 'correct horse battery' + String.fromCharCode(0xd800);
+  assert.throws(() => parseLogin({ username: 'admin', password }), { status: 400 });
+  await assert.rejects(hashPassword(password), { status: 400 });
+  const validHash = await hashPassword('correct horse battery' + '\ufffd');
+  assert.equal(await verifyPassword(password, validHash), false);
+});
+
 test('input validation enforces role, fields and boundaries without trimming passwords', () => {
   const input = { name: ' Cafe Admin ', username: 'Admin_1', password: '  password 12  ', role: 'ADMIN' };
   assert.deepEqual(parseRegister(input), { ...input, name: 'Cafe Admin', username: 'admin_1' });

@@ -12,10 +12,12 @@ async function passwordKey(password, salt) {
   finally { active--; }
 }
 export async function hashPassword(password) {
+  if (typeof password !== 'string' || !password.isWellFormed()) throw fail(400, 'INVALID_INPUT');
   const salt = randomBytes(16).toString('hex');
   return `scrypt$v1$${salt}$${(await passwordKey(password, salt)).toString('hex')}`;
 }
 export async function verifyPassword(password, stored) {
+  if (typeof password !== 'string' || !password.isWellFormed()) return false;
   if (typeof stored !== 'string' || !/^scrypt\$v1\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(stored)) return false;
   const [, , salt, hex] = stored.split('$');
   return timingSafeEqual(await passwordKey(password, salt), Buffer.from(hex, 'hex'));
