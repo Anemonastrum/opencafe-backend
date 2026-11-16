@@ -112,11 +112,7 @@ model Product {
   isAvailable Boolean  @default(true) @map("is_available")
 
   categoryId Int?      @map("category_id")
-  category   Category? @relation(
-    fields: [categoryId],
-    references: [id],
-    onDelete: SetNull
-  )
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -148,11 +144,7 @@ model Order {
 
   // Cashier
   cashierId Int  @map("cashier_id")
-  cashier   User @relation(
-    fields: [cashierId],
-    references: [id],
-    onDelete: Restrict
-  )
+  cashier   User @relation(fields: [cashierId], references: [id], onDelete: Restrict)
 
   // Receipt snapshots
   receiptCafeName    String? @map("receipt_cafe_name") @db.VarChar(150)
@@ -166,7 +158,7 @@ model Order {
   completedAt DateTime? @map("completed_at")
 
   items   OrderItem[]
-  payment Payment?
+  payments Payment[]
 
   @@index([cashierId])
   @@index([status, createdAt])
@@ -181,18 +173,10 @@ model OrderItem {
   id Int @id @default(autoincrement())
 
   orderId Int   @map("order_id")
-  order   Order @relation(
-    fields: [orderId],
-    references: [id],
-    onDelete: Cascade
-  )
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   productId Int?     @map("product_id")
-  product   Product? @relation(
-    fields: [productId],
-    references: [id],
-    onDelete: SetNull
-  )
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   // Product snapshot
   productName String  @map("product_name") @db.VarChar(150)
@@ -215,11 +199,7 @@ model Payment {
 
   // Order relationship
   orderId Int @map("order_id")
-  order   Order @relation(
-    fields: [orderId],
-    references: [id],
-    onDelete: Restrict
-  )
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   attemptNumber Int @default(1) @map("attempt_number")
 
