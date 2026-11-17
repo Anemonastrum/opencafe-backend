@@ -10,7 +10,7 @@ const base = process.env.IMAGE_BASE_URL || 'http://localhost:3001';
 const origin = new URL(base);
 if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== base || origin.username || origin.password || (process.env.NODE_ENV === 'production' && origin.protocol !== 'https:')) throw new Error('IMAGE_BASE_URL must be an exact HTTP(S) origin; HTTPS required in production');
 export const imageConfig = { root: fileURLToPath(new URL('../../uploads/', import.meta.url)), base, host: process.env.IMAGE_HOST || '127.0.0.1', port: process.env.IMAGE_PORT || '3001' };
-export const imagePathPattern = /^\/uploads\/(cafe|user\/[1-9]\d*)\/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.webp$/;
+export const imagePathPattern = /^\/uploads\/(cafe|(?:user|product)\/[1-9]\d*)\/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.webp$/;
 const invalid = () => Object.assign(new Error('Invalid image; use a valid JPEG, PNG or WebP'), { status: 400 });
 const formats = { '.jpg': ['jpeg','image/jpeg'], '.jpeg': ['jpeg','image/jpeg'], '.png': ['png','image/png'], '.webp': ['webp','image/webp'] };
 
@@ -47,7 +47,7 @@ export const convertImage = async file => {
 };
 
 export const saveImage = async (buffer, directory) => {
-  if (!/^(cafe|user\/[1-9]\d*)$/.test(directory)) throw new Error('Invalid image destination');
+  if (!/^(cafe|(?:user|product)\/[1-9]\d*)$/.test(directory)) throw new Error('Invalid image destination');
   const folder = path.join(imageConfig.root, directory);
   const name = randomUUID() + '.webp';
   const destination = path.join(folder, name);

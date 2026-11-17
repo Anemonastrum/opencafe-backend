@@ -14,7 +14,7 @@ export const uploadImage = (field, handler) => {
         for (const [key, value] of Object.entries(req.body)) {
           if (typeof value !== 'string' || !value.isWellFormed() || value.includes('\ufffd')) return res.status(400).json({ message: 'Invalid or duplicate form field' });
           size += Buffer.byteLength(key) + Buffer.byteLength(value);
-          if (['taxEnabled', 'taxInclusive', 'isActive'].includes(key)) {
+          if (['taxEnabled', 'taxInclusive', 'isActive', 'isAvailable'].includes(key)) {
             if (!['true','false'].includes(value)) return res.status(400).json({ message: 'Boolean fields must be true or false' });
             req.body[key] = value === 'true';
           }

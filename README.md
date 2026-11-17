@@ -5,6 +5,8 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 ## Implemented features
 
 - Singleton cafe settings: cafe name, address, logo URL, and tax configuration.
+- Product and category management with role-protected writes, pagination/search, product filters and image uploads.
+- Product unavailability instead of deletion; referenced categories cannot be deleted.
 - `ADMIN` and `CASHIER` roles with live database account, role, and session checks.
 - Migration-seeded first administrator; administrator-only account registration.
 - Salted scrypt password hashes; passwords and hashes never returned by the API.
@@ -20,7 +22,7 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 - Strict field allowlists, bounded pagination, JSON validation, and authentication rate limits.
 - Graceful HTTP server shutdown and Prisma disconnection on `SIGINT`/`SIGTERM`.
 
-Categories, products, orders, order items, and payments have database models only. Their API endpoints, checkout, receipts, Midtrans/QRIS integration, and tax calculations are **not implemented**. Tax endpoints currently store settings only. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
+Orders, order items, and payments have database models only. Their API endpoints, checkout, receipts, Midtrans/QRIS integration, and tax calculations are **not implemented**. Tax endpoints currently store settings only. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
 
 ## Setup
 
@@ -135,6 +137,16 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | POST | `/api/cafe` | ADMIN* | `name`, `address`; optional cafe fields and file `logo` | `201` `{message, cafeSetting}` |
 | PUT | `/api/cafe` | ADMIN* | Partial cafe fields; optional file `logo` | `200` `{message, cafeSetting}` |
 | DELETE | `/api/cafe` | ADMIN* | None | `200` `{message}` |
+| GET | `/api/products` | Both* | Query `page`, `limit`, `search`, `categoryId`, `isAvailable` | `200` `{products, total, page, limit}` |
+| GET | `/api/products/:id` | Both* | Positive product ID | `200` product object directly |
+| POST | `/api/products` | ADMIN* | `name`, `price`; optional product fields/file `image` | `201` `{message, product}` |
+| PUT | `/api/products/:id` | ADMIN* | Partial product fields/file `image` | `200` `{message, product}` |
+| DELETE | `/api/products/:id` | ADMIN* | Positive product ID | `200` `{message, product}`; marks unavailable |
+| GET | `/api/categories` | Both* | Query `page`, `limit`, `search` | `200` `{categories, total, page, limit}` |
+| GET | `/api/categories/:id` | Both* | Positive category ID | `200` category object directly |
+| POST | `/api/categories` | ADMIN* | JSON `name` | `201` `{message, category}` |
+| PUT | `/api/categories/:id` | ADMIN* | JSON `name` | `200` `{message, category}` |
+| DELETE | `/api/categories/:id` | ADMIN* | Positive category ID | `200` `{message}`; `409` if referenced |
 
 ### Image uploads
 
@@ -146,6 +158,7 @@ These existing endpoints accept multipart data with one optional file:
 | `POST /api/admin/users` | `image` | `uploads/user/<new-user-id>/<random-id>.webp` |
 | `PUT /api/auth/profile` | `image` | `uploads/user/<authenticated-id>/<random-id>.webp` |
 | `PUT /api/admin/cashiers/:id` | `image` | `uploads/user/<cashier-id>/<random-id>.webp` |
+| `POST /api/products`, `PUT /api/products/:id` | `image` | `uploads/product/<product-id>/<random-id>.webp` |
 
 - Allowlisted input: `.jpg`, `.jpeg`, `.png`, `.webp` (case-insensitive), with matching MIME type **and decoded image format**. Renaming another file to an image extension does not make it valid.
 - Maximum file size: 5 MiB. Maximum decoded area: 16,000,000 pixels; maximum side: 8192 pixels. SVG, animated/multiple-frame images, malformed/truncated images, unexpected file fields, and multiple files are rejected.
@@ -315,6 +328,51 @@ The new password must differ from the current password. A successful change clea
 
   The administrator supplies the password. The API hashes it, revokes all cashier sessions, and sets `mustChangePassword=true`. It never generates or returns a plaintext password. Deliver the chosen password securely; the cashier must sign in and change it before continuing. A reset does not reactivate an inactive cashier.
 
+### Products and categories
+
+Categories have unique trimmed names (1–100 Unicode characters). POST/PUT category requests require JSON. Product fields:
+
+| Field | Create requirement / default | Validation |
+| --- | --- | --- |
+| `name` | Required | Trimmed, 1–150 Unicode characters |
+| `price` | Required | Number or decimal string, 0–9999999999.99, at most 2 decimal places; no signs/exponents |
+| `description` | Optional / `null` | Nonempty trimmed text, at most 65535 UTF-8 bytes, or JSON `null` |
+| `categoryId` | Optional / `null` | Existing positive signed-INT category ID, or JSON `null`; multipart uses canonical integer text |
+| `isAvailable` | Optional / `true` | JSON boolean or multipart `true`/`false` |
+| `image` | Optional file | Multipart JPEG/PNG/WebP under shared image limits |
+| `imageUrl` | Server-owned / `null` | Only JSON `null` accepted to clear; non-null client URLs rejected |
+
+PUT is partial: omitted fields remain unchanged, empty updates fail. JSON `null` clears description/category/image; multipart `"null"` is not null. Unknown fields, duplicate/array query/form fields, malformed Unicode and invalid IDs return `400`. Missing detail/update/delete records return `404`; nonexistent category assignments return `400`. Duplicate category names return `409` (database collation governs uniqueness). Product responses include `category: {id, name}` or `null`, timestamps and price serialized as a decimal string; no order items included.
+
+JSON numeric prices are validated from their original tokens before floating-point conversion, so exponent notation and excess precision are rejected rather than rounded. Decimal strings are recommended for monetary clients.
+
+Lists accept `page=1`, `limit=20` (max 100) and optional trimmed `search` (1–150 characters, name substring). IDs/pagination must be positive integers without leading zeros; offsets must fit a signed 32-bit integer. Results sort by ascending ID. Products also accept `categoryId` and exact query `isAvailable=true`/`false`. Both roles can read unavailable products; filter explicitly when needed. Unknown/duplicate query fields return `400`. Known limitation: malformed percent-encoded UTF-8 in search queries can be decoded to U+FFFD and treated as search text rather than rejected.
+
+`DELETE /api/products/:id` retains product, image and order relationships, setting `isAvailable=false`. Repeat deletion succeeds; restore with `PUT` and `isAvailable=true`. `DELETE /api/categories/:id` returns `409` while **any** product references it, including unavailable products. Reassign or clear those product categories first. Historical order snapshots remain unchanged. Mutations recheck administrator/session state under transaction locks; concurrent reference conflicts return `409` rather than silently changing assignments.
+
+Create category:
+
+```json
+{"name": "Coffee"}
+```
+
+Create product (`POST /api/products`):
+
+```json
+{"name": "Espresso", "price": "18000.00", "categoryId": 1, "isAvailable": true}
+```
+
+Upload image with creation (use real category ID):
+
+```sh
+curl -X POST http://localhost:3000/api/products \
+  -H "Authorization: Bearer <access-token>" \
+  -F 'name=Espresso' -F 'price=18000.00' -F 'categoryId=1' \
+  -F 'isAvailable=true' -F 'image=@./espresso.png;type=image/png'
+```
+
+Example list: `GET /api/products?page=1&limit=20&search=Espresso&categoryId=1&isAvailable=true`.
+
 ### Cafe settings
 
 A single record is managed at ID `1`; there is no ID path parameter. Creating it twice returns `409`. Reading, updating, or deleting a missing record returns `404`. `PUT` updates only supplied fields.
@@ -353,38 +411,35 @@ Handled errors generally use `{ "message": "..." }`; forced-password-change erro
 | `400` | Invalid fields, body, JSON/UTF-8, oversized JSON, missing required JSON content type, or invalid pagination/ID |
 | `401` | Invalid credentials, invalid/expired access token, missing/invalid refresh cookie, inactive account, or expired/revoked session |
 | `403` | Wrong role, pending required password change, denied origin, or administrator permission changed |
-| `404` | Missing cafe settings, missing cashier, or non-cashier management target |
-| `409` | Duplicate username or existing singleton cafe settings |
+| `404` | Missing cafe settings, cashier, product or category, or non-cashier management target |
+| `409` | Duplicate username/category name, existing singleton cafe settings, referenced category deletion, or concurrent catalog conflict |
 | `413` | Uploaded image or multipart text exceeds size limits |
 | `429` | Authentication rate limit, hash-concurrency budget, or image-upload admission limit reached |
 | `500` | Server/database error; unsupported JSON charset/encoding currently also falls through to the generic server error handler |
 
 ## Checks
 
-Generate the Prisma client before running checks. Offline checks use stubbed database delegates and do not require a live database; the immutable-migration check also requires repository Git history containing commit `208f302` (use a full clone).
+Test scripts are intentionally ignored and are not included in fresh clones. `npm test` can exit successfully with **zero tests** when no local `scripts/*.check.js` files exist; that is not verification.
+
+Available source/schema checks:
 
 ```sh
 npx prisma generate
-npm test
 npx prisma validate
+npm audit
+git diff --check
 ```
 
-Integration checks write fixtures to **`pos_auth_test` only**, require explicit target acknowledgement, and remove their own fixture accounts afterward. Use an isolated test database with the committed migrations applied. The current suite expects the unchanged seeded `admin` account and no cafe settings; do not point it at a working installation or change an existing database to satisfy these assumptions.
-
-Example for a dedicated local test database, after setting test database credentials and applying migrations with a matching `DATABASE_URL`:
+Local catalog checks, when present, run explicitly:
 
 ```sh
+node --import tsx --test scripts/catalog.check.js
 DATABASE_NAME=pos_auth_test \
-DATABASE_HOST=127.0.0.1 \
-DATABASE_PORT=3306 \
-AUTH_TEST_DATABASE_ACK=127.0.0.1:3306/pos_auth_test \
-NODE_ENV=development \
-npm run test:integration
+AUTH_TEST_DATABASE_ACK=<test-host>:<test-port>/pos_auth_test \
+node --import tsx --test scripts/catalog.integration.js
 ```
 
-`DATABASE_USER` and `DATABASE_PASSWORD` come from the environment or `.env`; ensure they belong to the isolated test server. The acknowledgement must exactly match `DATABASE_HOST:DATABASE_PORT/DATABASE_NAME` (port defaults to `3306`). Never run migration resets or database recreation against existing business data.
-
-Checks cover password hashing and validation, JWT claims, role/forced-change guards, rate limits, profile URL/field rules, cashier scope, session rotation/replay/logout, revocation, and real MariaDB lifecycle and transaction-barrier races.
+Integration checks require explicit test-target acknowledgement, create uniquely named fixtures in `pos_auth_test`, and clean only their own rows/files. Credentials come from the environment or ignored `.env`. The acknowledgement must match `DATABASE_HOST:DATABASE_PORT/DATABASE_NAME` (port defaults to 3306). Never point fixture checks at production or reset existing databases to satisfy a test. Catalog verification includes role/forced-change guards, validation, filters/pagination, category assignment/deletion races, unavailable retention, images/replacements and rollback cleanup.
 
 ## Project layout
 
@@ -397,10 +452,9 @@ src/server.js                 HTTP listener and shutdown handlers
 src/configs/prisma.js         MariaDB adapter and generated Prisma client
 src/controllers/              Direct Prisma request handlers
 src/middlewares/              Authentication, roles, origin/JSON checks, limits
-src/routes/                   Auth, administrator, and cafe routers
+src/routes/                   Auth, administrator, cafe, product and category routers
 src/utils/                    Validation, passwords/JWT, sessions, projections
-scripts/*.check.js            Offline checks
-scripts/*.integration.js      Database fixture and concurrency checks
+scripts/                     Ignored local verification scripts (not shipped)
 src/image.app.js              WebP-only public image server
 uploads/                      Ignored local WebP files
 ```
