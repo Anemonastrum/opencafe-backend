@@ -37,7 +37,7 @@ test('JWT verifies signature, audience, issuer and expiry with minimal claims', 
     assert.throws(() => auth.verifyAccessToken(bad));
   }
   assert.equal(auth.refreshDigest(auth.createRefreshToken()).length, 64);
-  assert.deepEqual(auth.safeUser({ id: 1, name: 'Test', username: 'test', role: 'ADMIN', mustChangePassword: true, passwordHash: 'private' }), { id: 1, name: 'Test', username: 'test', role: 'ADMIN', mustChangePassword: true });
+  assert.deepEqual(auth.safeUser({ id: 1, name: 'Test', username: 'test', role: 'ADMIN', mustChangePassword: true, passwordHash: 'private' }), { id: 1, name: 'Test', username: 'test', role: 'ADMIN', mustChangePassword: true, imageUrl: null });
 });
 test('migration seed verifies with runtime hashing and keeps applied SQL immutable', async () => {
   for (const name of ['202611170001_baseline', '202611170002_auth']) {

@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import jwt from 'jsonwebtoken';
+import { passwordValid, validateProfile } from './user.utils.js';
+export { safeUser } from './user.utils.js';
 
 const secret = process.env.JWT_SECRET;
 if (!secret || Buffer.byteLength(secret) < 32 || secret !== secret.trim() || /[\x00-\x20\x7f]/.test(secret)) throw new Error('JWT_SECRET must contain at least 32 bytes without whitespace or controls');
@@ -17,7 +19,6 @@ export const authConfig = { production, origin, accessSeconds: 900, sessionMs: 3
 const derive = promisify(scrypt);
 let hashJobs = 0;
 
-const passwordValid = value => typeof value === 'string' && value.isWellFormed() && Buffer.byteLength(value) >= 12 && Buffer.byteLength(value) <= 128;
 const keyFor = async (password, salt) => {
   if (hashJobs >= 4) throw Object.assign(new Error('Too many authentication requests'), { status: 429 });
   hashJobs++;
@@ -43,8 +44,10 @@ export const validateLogin = body => {
   return { data: { username: body.username.toLowerCase(), password: body.password } };
 };
 export const validateRegistration = body => {
-  if (!objectWith(body, ['name', 'username', 'password', 'role']) || typeof body.name !== 'string' || !body.name.isWellFormed() || !body.name.trim() || [...body.name.trim()].length > 100 || !usernameValid(body.username) || !passwordValid(body.password) || (body.role !== undefined && !['ADMIN', 'CASHIER'].includes(body.role))) return { error: 'Valid name, username, password and ADMIN/CASHIER role required' };
-  return { data: { name: body.name.trim(), username: body.username.toLowerCase(), password: body.password, role: body.role || 'CASHIER' } };
+  if (!objectWith(body, ['name', 'username', 'password', 'role', 'imageUrl']) || typeof body.name !== 'string' || !body.name.isWellFormed() || !body.name.trim() || [...body.name.trim()].length > 100 || !usernameValid(body.username) || !passwordValid(body.password) || (body.role !== undefined && !['ADMIN', 'CASHIER'].includes(body.role))) return { error: 'Valid name, username, password and ADMIN/CASHIER role required' };
+  const image = body.imageUrl === undefined ? {} : validateProfile({ imageUrl: body.imageUrl });
+  if (image.error) return image;
+  return { data: { name: body.name.trim(), username: body.username.toLowerCase(), password: body.password, role: body.role || 'CASHIER', ...image.data } };
 };
 export const validatePasswordChange = body => {
   if (!objectWith(body, ['currentPassword', 'newPassword']) || !passwordValid(body.currentPassword) || !passwordValid(body.newPassword) || body.currentPassword === body.newPassword) return { error: 'Current password and different new password (12–128 UTF-8 bytes) required' };
@@ -58,4 +61,3 @@ export const verifyAccessToken = token => {
 };
 export const createRefreshToken = () => randomBytes(32).toString('hex');
 export const refreshDigest = token => createHash('sha256').update(token).digest('hex');
-export const safeUser = user => ({ id: user.id, name: user.name, username: user.username, role: user.role, mustChangePassword: user.mustChangePassword });
