@@ -1,14 +1,21 @@
 import express from 'express';
+import { isUtf8 } from 'node:buffer';
+import authRoutes from './routes/auth.route.js';
+import adminRoutes from './routes/admin.route.js';
 import cafeSettingRoutes from './routes/cafe.route.js';
 
 const app = express();
 
-app.use(express.json({ limit: '80kb' }));
+app.use(express.json({ limit: '80kb', verify: (req, res, buffer) => {
+  if (!isUtf8(buffer)) throw Object.assign(new Error('Invalid UTF-8'), { status: 400 });
+} }));
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/cafe', cafeSettingRoutes);
 
 // stop send error to client if json is too large or invalid
 app.use((err, req, res, next) => {
-  if (err.type === 'entity.parse.failed' || err.type === 'entity.too.large') return res.status(400).json({ message: 'JSON is too large' });
+  if (err.type === 'entity.parse.failed' || err.type === 'entity.too.large' || err.type === 'entity.verify.failed') return res.status(400).json({ message: 'JSON is too large' });
   res.status(500).json({ message: 'server error' });
 });
 
