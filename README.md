@@ -87,6 +87,22 @@ Migration `202611170003_default_admin` inserts this account only if no `ADMIN` e
 
 Existing administrators are not overwritten. A reserved `admin` username conflict fails instead of promoting that account. The password-change endpoint revokes all sessions, so sign in again afterward.
 
+### Default cafe settings
+
+Migration `202611170005_default_cafe_settings` inserts singleton settings (`id=1`) only when absent:
+
+| Field | Initial value |
+| --- | --- |
+| Name | `OpenCafe` |
+| Address | `OpenCafe Street` |
+| Logo | `null` |
+| Tax enabled | `false` |
+| Tax name | `PBJT` |
+| Tax rate | `10.00` |
+| Tax inclusive | `false` |
+
+Existing settings are not overwritten. Edit initial settings through `PUT /api/cafe`; `POST /api/cafe` returns `409` while settings already exist. This migration runs once, not on every server start.
+
 ## API conventions
 
 - Local base URL: `http://localhost:3000`.
