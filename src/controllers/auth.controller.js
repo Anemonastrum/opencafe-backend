@@ -1,4 +1,5 @@
 import { prisma } from '../configs/prisma.js';
+import { saveImage, removeImage } from '../utils/image.utils.js';
 import { validateProfile } from '../utils/user.utils.js';
 import { authConfig, createAccessToken, hashPassword, safeUser, validateLogin, validatePasswordChange, verifyPassword } from '../utils/auth.utils.js';
 import { clearRefreshCookie, newSession, readRefreshCookie, revokeSession, rotateSession, setRefreshCookie, validSession, withUserLock } from '../utils/session.utils.js';
@@ -59,15 +60,20 @@ export const getMe = (req, res) => res.json({ user: req.user });
 export const updateProfile = async (req, res) => {
   const { data, error } = validateProfile(req.body);
   if (error) return res.status(400).json({ message: error });
+  let saved, previous;
   try {
     const user = await withUserLock(req.user.id, async (tx, current) => {
       const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
       if (!validSession(session, current) || current.mustChangePassword) return null;
+      previous = current.imageUrl;
+      if (req.image) { saved = await saveImage(req.image, `user/${current.id}`); data.imageUrl = saved.url; }
       return tx.user.update({ where: { id: current.id }, data });
     });
     if (!user) return res.status(401).json({ message: 'Session or account changed; sign in again' });
+    if (Object.hasOwn(data, 'imageUrl')) await removeImage(previous);
     return res.json({ message: 'Profile updated successfully', user: safeUser(user) });
   } catch (error) {
+    if (saved) await removeImage(saved.url);
     if (error.code === 'P2002') return res.status(409).json({ message: 'Username already exists' });
     return handleError(res, error);
   }

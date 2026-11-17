@@ -22,12 +22,7 @@ export const validateProfile = (body, admin = false) => {
     }
     if (key === 'imageUrl') {
       if (value === null) { data.imageUrl = null; continue; }
-      try {
-        if (typeof value !== 'string' || !value.isWellFormed() || value.length > 500 || /[\s\p{Cc}]/u.test(value)) return { error: 'Invalid image URL' };
-        const url = new URL(value);
-        if (!/^https?:\/\//i.test(value) || !['http:', 'https:'].includes(url.protocol) || url.username || url.password) return { error: 'HTTP(S) image URL required' };
-        data.imageUrl = value;
-      } catch { return { error: 'Invalid image URL' }; }
+      return { error: 'Upload an image instead of supplying imageUrl' };
     }
   }
   return { data };

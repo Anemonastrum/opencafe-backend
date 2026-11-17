@@ -38,10 +38,10 @@ test('real profile editing, cashier management, reset/deactivation lifecycle and
     let signed = await login(cashier.username);
     assert.equal(signed.body.user.imageUrl, null);
     for (const session of [adminSession, signed]) {
-      const updated = await request('/api/auth/profile', 'PUT', { name: ' Changed ', imageUrl: 'https://example.com/avatar.png' }, session.body.accessToken);
+      const updated = await request('/api/auth/profile', 'PUT', { name: ' Changed ', imageUrl: null }, session.body.accessToken);
       assert.equal(updated.status, 200); assert.equal(updated.body.user.name, 'Changed');
-      assert.equal(updated.body.user.imageUrl, 'https://example.com/avatar.png');
-      assert.equal((await request('/api/auth/me', 'GET', undefined, session.body.accessToken)).body.user.imageUrl, 'https://example.com/avatar.png');
+      assert.equal(updated.body.user.imageUrl, null);
+      assert.equal((await request('/api/auth/me', 'GET', undefined, session.body.accessToken)).body.user.imageUrl, null);
     }
     const changedUsername = prefix + '_new';
     assert.equal((await request('/api/auth/profile', 'PUT', { username: changedUsername }, signed.body.accessToken)).status, 200);
@@ -49,15 +49,15 @@ test('real profile editing, cashier management, reset/deactivation lifecycle and
     assert.equal((await request('/api/auth/profile', 'PUT', { role: 'ADMIN' }, signed.body.accessToken)).status, 400);
     assert.equal((await request('/api/auth/profile', 'PUT', { isActive: false }, signed.body.accessToken)).status, 400);
     const renewed = await request('/api/auth/refresh', 'POST', undefined, undefined, signed.cookie);
-    assert.equal(renewed.body.user.imageUrl, 'https://example.com/avatar.png');
+    assert.equal(renewed.body.user.imageUrl, null);
     signed = await login(changedUsername);
-    assert.equal(signed.body.user.imageUrl, 'https://example.com/avatar.png');
+    assert.equal(signed.body.user.imageUrl, null);
     const list = await request('/api/admin/cashiers?limit=100', 'GET', undefined, token);
     assert.equal(list.status, 200); assert.ok(list.body.cashiers.some(user => user.id === cashier.id));
     assert.ok(list.body.cashiers.every(user => user.role === 'CASHIER' && typeof user.isActive === 'boolean'));
     assert.equal((await request('/api/admin/cashiers', 'GET', undefined, signed.body.accessToken)).status, 403);
     const path = `/api/admin/cashiers/${cashier.id}`;
-    assert.equal((await request(path, 'GET', undefined, token)).body.cashier.imageUrl, 'https://example.com/avatar.png');
+    assert.equal((await request(path, 'GET', undefined, token)).body.cashier.imageUrl, null);
     const edited = await request(path, 'PUT', { name: 'Edited cashier', imageUrl: null }, token);
     assert.equal(edited.status, 200); assert.equal(edited.body.cashier.imageUrl, null);
     assert.equal((await request(`/api/admin/cashiers/${admin.id}`, 'GET', undefined, token)).status, 404);

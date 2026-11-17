@@ -8,7 +8,7 @@ test('partial profile allowlist preserves null and false; validates URLs and tex
   assert.deepEqual(utils.validateProfile({ name: ' Test ', username: 'TEST', imageUrl: null }).data, { name: 'Test', username: 'test', imageUrl: null });
   assert.deepEqual(utils.validateProfile({ isActive: false }, true).data, { isActive: false });
   for (const body of [null, [], {}, { role: 'ADMIN' }, { id: 1 }, { password: 'secret' }, { isActive: true }, { name: '' }, { username: 'a b' }, { imageUrl: '' }, { imageUrl: 'javascript:alert(1)' }, { imageUrl: 'https://user:pass@example.com/a' }, { imageUrl: 'https://example.com/\n' }, { imageUrl: 'https://example.com/' + 'a'.repeat(500) }, { name: '\ud800' }]) assert.ok(utils.validateProfile(body).error, JSON.stringify(body));
-  assert.equal(utils.validateProfile({ imageUrl: 'https://example.com/avatar.png' }).error, undefined);
+  assert.ok(utils.validateProfile({ imageUrl: 'https://example.com/avatar.png' }).error);
   assert.ok(utils.validateProfile({ isActive: 'false' }, true).error);
   assert.equal(utils.validateResetPassword({ newPassword: 'Changed password!' }).error, undefined);
   assert.ok(utils.validateResetPassword({ newPassword: 'short' }).error);
@@ -60,6 +60,6 @@ test('IDs and pagination bounded; safe projection and registration include image
   assert.equal(auth.safeUser(user).imageUrl, user.imageUrl);
   assert.equal(utils.safeCashier(user).isActive, false);
   assert.equal(auth.safeUser({ ...user, imageUrl: undefined }).imageUrl, null);
-  const registration = auth.validateRegistration({ name: 'Test', username: 'test', password: 'Fixture password!', imageUrl: user.imageUrl });
-  assert.equal(registration.data.imageUrl, user.imageUrl);
+  const registration = auth.validateRegistration({ name: 'Test', username: 'test', password: 'Fixture password!', imageUrl: null });
+  assert.equal(registration.data.imageUrl, null);
 });

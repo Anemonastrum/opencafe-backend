@@ -1,4 +1,5 @@
 import { prisma } from '../configs/prisma.js';
+import { saveImage, removeImage } from '../utils/image.utils.js';
 import { validateProfile, validateResetPassword, parseUserId, parseCashierPage, safeCashier } from '../utils/user.utils.js';
 import { hashPassword, safeUser, validateRegistration } from '../utils/auth.utils.js';
 import { validSession, withUserLock } from '../utils/session.utils.js';
@@ -51,14 +52,18 @@ export const updateCashier = async (req, res) => {
   if (!id) return res.status(400).json({ message: 'Invalid cashier ID' });
   const { data, error } = validateProfile(req.body, true);
   if (error) return res.status(400).json({ message: error });
+  let saved, previous;
   try {
     const cashier = await withCashierLock(req, id, async (tx, current) => {
+      previous = current.imageUrl;
+      if (req.image) { saved = await saveImage(req.image, `user/${current.id}`); data.imageUrl = saved.url; }
       const updated = await tx.user.update({ where: { id: current.id }, data });
       if (data.isActive === false) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
       return updated;
     });
+    if (Object.hasOwn(data, 'imageUrl')) await removeImage(previous);
     return res.json({ message: 'Cashier updated successfully', cashier: safeCashier(cashier) });
-  } catch (error) { return handleError(res, error); }
+  } catch (error) { if (saved) await removeImage(saved.url); return handleError(res, error); }
 };
 
 export const resetCashierPassword = async (req, res) => {
@@ -81,16 +86,21 @@ export const registerUser = async (req, res) => {
   const { data, error } = validateRegistration(req.body);
   if (error) return res.status(400).json({ message: error });
 
+  let saved;
   try {
     const passwordHash = await hashPassword(data.password);
     const user = await withUserLock(req.user.id, async (tx, admin) => {
       const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
       if (!validSession(session, admin) || admin.role !== 'ADMIN' || admin.mustChangePassword) return null;
-      return tx.user.create({ data: { name: data.name, username: data.username, role: data.role, imageUrl: data.imageUrl, passwordHash, mustChangePassword: true } });
+      const created = await tx.user.create({ data: { name: data.name, username: data.username, role: data.role, imageUrl: data.imageUrl, passwordHash, mustChangePassword: true } });
+      if (!req.image) return created;
+      saved = await saveImage(req.image, `user/${created.id}`);
+      return tx.user.update({ where: { id: created.id }, data: { imageUrl: saved.url } });
     });
     if (!user) return res.status(403).json({ message: 'Administrator permission required' });
     return res.status(201).json({ message: 'User registered successfully', user: safeUser(user) });
   } catch (error) {
+    if (saved) await removeImage(saved.url);
     const errors = {
       P2002: { status: 409, message: 'Username already exists' },
     };

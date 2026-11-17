@@ -30,13 +30,7 @@ export const validateCafeSetting = (body, update = false) => {
         data[key] = null;
         continue;
       }
-      try {
-        const url = new URL(value);
-        if (typeof value !== 'string' || !value.isWellFormed() || value.length > 500 || value !== value.trim() || !['http:', 'https:'].includes(url.protocol) || url.username || url.password) return { error: 'logoUrl harus URL HTTP atau HTTPS' };
-        data[key] = value;
-      } catch {
-        return { error: 'logoUrl tidak valid' };
-      }
+      return { error: 'Upload a logo instead of supplying logoUrl' };
     }
   }
 

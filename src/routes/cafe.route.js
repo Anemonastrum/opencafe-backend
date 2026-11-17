@@ -8,12 +8,14 @@ import {
 
 import { authenticate, requirePasswordChangeComplete, requireRoles } from '../middlewares/auth.middleware.js';
 
+import { uploadImage } from '../middlewares/upload.middleware.js';
+
 const router = express.Router();
 router.use(authenticate, requirePasswordChangeComplete);
 
 router.get('/', getCafeSetting);
-router.post('/', requireRoles('ADMIN'), createCafeSetting);
-router.put('/', requireRoles('ADMIN'), updateCafeSetting);
+router.post('/', requireRoles('ADMIN'), uploadImage('logo', createCafeSetting));
+router.put('/', requireRoles('ADMIN'), uploadImage('logo', updateCafeSetting));
 router.delete('/', requireRoles('ADMIN'), deleteCafeSetting);
 
 export default router;
