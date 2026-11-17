@@ -7,6 +7,7 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 - Singleton cafe settings: cafe name, address, logo URL, and tax configuration.
 - Product and category management with role-protected writes, pagination/search, product filters and image uploads.
 - Product unavailability instead of deletion; referenced categories cannot be deleted.
+- Pending orders with cashier ownership, captured prices/tax/receipt details, exact totals, item replacement and retained cancellation history.
 - `ADMIN` and `CASHIER` roles with live database account, role, and session checks.
 - Migration-seeded first administrator; administrator-only account registration.
 - Salted scrypt password hashes; passwords and hashes never returned by the API.
@@ -22,7 +23,7 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 - Strict field allowlists, bounded pagination, JSON validation, and authentication rate limits.
 - Graceful HTTP server shutdown and Prisma disconnection on `SIGINT`/`SIGTERM`.
 
-Orders, order items, and payments have database models only. Their API endpoints, checkout, receipts, Midtrans/QRIS integration, and tax calculations are **not implemented**. Tax endpoints currently store settings only. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
+Pending-order APIs and tax calculations are implemented. Payment APIs, checkout/completion, receipt rendering and Midtrans/QRIS integration are **not implemented**. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
 
 ## Setup
 
@@ -147,6 +148,56 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | POST | `/api/categories` | ADMIN* | JSON `name` | `201` `{message, category}` |
 | PUT | `/api/categories/:id` | ADMIN* | JSON `name` | `200` `{message, category}` |
 | DELETE | `/api/categories/:id` | ADMIN* | Positive category ID | `200` `{message}`; `409` if referenced |
+| POST | `/api/orders` | Both*; actor owns new order | JSON `items` | `201` `{message, order}` |
+| GET | `/api/orders` | Both*; owner scope | Query `page`, `limit`, `status`, `orderNumber`; ADMIN-only `cashierId` | `200` `{orders, total, page, limit}` |
+| GET | `/api/orders/:id` | Both*; owner or ADMIN | Positive order ID | `200` order with items directly |
+| PUT | `/api/orders/:id` | Both*; owner or ADMIN | JSON full replacement `items` | `200` `{message, order}`; pending only |
+| POST | `/api/orders/:id/cancel` | Both*; owner or ADMIN | No body or empty JSON object | `200` `{message, order}`; retains history |
+
+### Pending orders
+
+Create an order with `POST /api/orders` or replace its complete item selection with `PUT /api/orders/:id`:
+
+```json
+{
+  "items": [
+    {"productId": 1, "quantity": 2},
+    {"productId": 2, "quantity": 1}
+  ]
+}
+```
+
+- JSON only; 1–100 distinct product IDs, integer `productId` from 1 to 2147483647, integer `quantity` from 1 to 999. Duplicates, unknown fields, empty selections and client-supplied prices/totals/status/cashier fields return `400`. Missing/unavailable **new** products return `400`.
+- Server generates `OC-<UUID>` order number, sets `PENDING`, and attributes order to current authenticated user, including an ADMIN creating an order. CASHIER can access only own orders; foreign or missing order IDs return `404`. ADMIN can read/edit/cancel any order without changing its original owner.
+- Creation requires cafe settings (`id=1`); absent settings return `409`. It snapshots cafe name/address/logo URL, cashier name, product names/prices and enabled tax rules. No migration is automatically deployed or missing settings silently created.
+- Existing lines retain captured names/prices on quantity edits even after catalog rename, repricing or unavailability. Newly selected products capture current available catalog. Omitted products are removed; adding them again in a later request uses current catalog. Order tax/receipt/owner snapshots stay unchanged after edits. Item row IDs may change; use `productId` to identify selection. Identical selection succeeds without changing timestamps/items.
+- Amounts and `taxRate` are fixed two-decimal strings, including nested `unitPrice` and `subtotal`. Line subtotal equals captured price times quantity. `subtotalAmount` sums line subtotals. Money uses exact integer cents, not floating point, and is bounded by `9999999999.99`; overflowing line/order/tax/total returns `400`.
+- Disabled tax captures `taxName=null`, `taxRate="0.00"`, `taxAmount="0.00"`, `taxInclusive=false`. Exclusive tax is subtotal times rate; tax is added to total. Inclusive tax is subtotal times rate divided by `(100 + rate)`; tax is already contained in subtotal and total equals subtotal. Round half up once per order, not once per line. Example: exclusive 10% of `0.05` gives tax `0.01`, total `0.06`; inclusive 10% of `0.05` gives tax `0.00`, total `0.05`.
+- Pending edits/cancellation return `409` when any `PENDING` or `PAID` payment exists. No payment rows are created/modified by these endpoints. Financial edits to cancelled/completed orders return `409`. Invalid legacy financial snapshots or null product references block editing with `409` instead of inventing history; cancellation can preserve legacy rows unchanged. Legacy signed stored amounts are returned as signed fixed-decimal strings, not repaired or accepted for new pricing.
+- Cancel using `POST /api/orders/:id/cancel` without body or with `{}` as JSON. PENDING becomes CANCELLED, retaining items/amounts; `completedAt` stays null. Repeated cancellation succeeds unchanged; COMPLETED cancellation returns `409`. No hard deletion, generic status setter or completion endpoint.
+- Lists default to `page=1`, `limit=20`, `status=PENDING`; maximum limit100 and signed-32-bit offset. Status filter accepts `PENDING`, `CANCELLED`, `COMPLETED`, `ALL`; `orderNumber` is exact match, nonempty and at most50 code points. Only ADMIN may supply `cashierId`. Unknown/duplicate/array parameters and malformed percent/UTF-8 query encoding return `400`. Known minor limitation: malformed encoding after a second literal `?` in the query can bypass raw encoding validation and become replacement text. Sort newest `createdAt` first, then descending ID. List rows include `_count.items`; detail includes items ordered by item ID. List count/rows share one consistent read; different pages are not frozen together.
+- Mutations recheck live role/session/account state under actor/order locks. Concurrent edit/cancel is serialized; concurrent full edits use last committed selection, not merge/version checks. Deadlock/write conflict returns `409`. No durable create-idempotency key: do not blindly retry POST after an uncertain response because duplicate orders are possible.
+- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. No payment, completion, stock reservation, customer/table fields or receipt renderer in this phase.
+
+Example create response with captured unit price `12.50`, quantity2 and exclusive10% tax (IDs and timestamps omitted here):
+
+```json
+{
+  "message": "Order created successfully",
+  "order": {
+    "orderNumber": "OC-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "status": "PENDING",
+    "cashierId": 7,
+    "subtotalAmount": "25.00",
+    "taxName": "PBJT",
+    "taxRate": "10.00",
+    "taxInclusive": false,
+    "taxAmount": "2.50",
+    "totalAmount": "27.50",
+    "items": [{"productId": 1, "productName": "Coffee", "unitPrice": "12.50", "quantity": 2, "subtotal": "25.00"}]
+  }
+}
+```
 
 ### Image uploads
 
