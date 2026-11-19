@@ -1,6 +1,6 @@
 // cek data yang boleh masuk, field lain jangan ikut disimpan
 export const validateCafeSetting = (body, update = false) => {
-  const fields = ['name', 'address', 'logoUrl', 'taxEnabled', 'taxName', 'taxRate', 'taxInclusive'];
+  const fields = ['name', 'address', 'logoUrl', 'taxEnabled', 'taxName', 'taxRate', 'taxInclusive', 'receiptPaperSize'];
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'data harus berupa object' };
   if (!Object.keys(body).length || Object.keys(body).some(key => !fields.includes(key))) return { error: 'field tidak valid' };
   if (!update && (body.name === undefined || body.address === undefined)) return { error: 'nama dan alamat wajib diisi' };
@@ -8,6 +8,11 @@ export const validateCafeSetting = (body, update = false) => {
   const data = {};
   for (const key of Object.keys(body)) {
     const value = body[key];
+
+    if (key === 'receiptPaperSize') {
+      if (!['58mm', '80mm'].includes(value)) return { error: 'receiptPaperSize must be 58mm or 80mm' };
+      data[key] = value;
+    }
 
     if (['name', 'address', 'taxName'].includes(key)) {
       const limit = key === 'name' ? 150 : key === 'taxName' ? 50 : 65535;

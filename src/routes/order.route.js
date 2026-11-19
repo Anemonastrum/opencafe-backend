@@ -1,6 +1,7 @@
 import express from 'express';
 import { createOrder, listOrders, getOrder, updateOrder, cancelOrder } from '../controllers/order.controller.js';
 import { createPayment, listPayments, reconcilePayment } from '../controllers/payment.controller.js';
+import { generateReceipt, downloadReceipt } from '../controllers/receipt.controller.js';
 import { authenticate, requirePasswordChangeComplete, requireRoles, requireJson } from '../middlewares/auth.middleware.js';
 
 const router=express.Router();
@@ -14,6 +15,8 @@ router.use((req,res,next)=>{
 });
 router.get('/',listOrders);
 router.get('/:id',getOrder);
+router.post('/:id/receipt',generateReceipt);
+router.get('/:id/receipt',downloadReceipt);
 router.get('/:id/payments',listPayments);
 router.post('/:id/payments',requireJson,createPayment);
 router.post('/:id/payments/:paymentId/reconcile',reconcilePayment);

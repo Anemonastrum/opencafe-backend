@@ -99,6 +99,7 @@ model CafeSetting {
   name    String  @db.VarChar(150)
   logoUrl String? @map("logo_url") @db.VarChar(500)
   address String  @db.Text
+  receiptPaperSize String @default("58mm") @map("receipt_paper_size") @db.VarChar(4)
 
   // Tax settings
   taxEnabled   Boolean @default(false) @map("tax_enabled")
@@ -181,6 +182,8 @@ model Order {
   receiptCafeAddress String? @map("receipt_cafe_address") @db.Text
   receiptLogoUrl     String? @map("receipt_logo_url") @db.VarChar(500)
   receiptCashierName String? @map("receipt_cashier_name") @db.VarChar(100)
+  receiptPaperSize String? @map("receipt_paper_size") @db.VarChar(4)
+  receiptUrl String? @map("receipt_url") @db.VarChar(500)
 
   // Timestamps
   createdAt   DateTime  @default(now()) @map("created_at")

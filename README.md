@@ -23,7 +23,7 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 - Strict field allowlists, bounded pagination, JSON validation, and authentication rate limits.
 - Graceful HTTP server shutdown and Prisma disconnection on `SIGINT`/`SIGTERM`.
 
-Pending-order APIs, exact tax calculations, CASH checkout and native Midtrans Core API QRIS payments are implemented, including payment replay, signed notifications and protected status reconciliation. Successful payment completes its order atomically. Receipt rendering, refunds, payment force-release and background reconciliation are **not implemented**. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
+Pending-order APIs, exact tax calculations, CASH checkout and native Midtrans Core API QRIS payments are implemented, including payment replay, signed notifications and protected status reconciliation. Successful payment completes its order atomically. Receipt rendering is implemented as described below. Refunds, payment force-release and background reconciliation are **not implemented**. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
 
 ## Setup
 
@@ -119,7 +119,7 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 
 ### All available endpoints
 
-`ADMIN*` / `Both*` mean the account must have completed its required password change. Every successful response below is JSON.
+`ADMIN*` / `Both*` mean the account must have completed its required password change. Responses are JSON unless PDF is explicitly listed.
 
 | Method | Path | Access | Input | Success |
 | --- | --- | --- | --- | --- |
@@ -156,7 +156,21 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | POST | `/api/orders/:id/payments` | Both*; owner or ADMIN | `requestId`, `method`; CASH requires `cashReceived` | `201` new payment, `200` replay, `202` unresolved; `{message, order, payment}` |
 | GET | `/api/orders/:id/payments` | Both*; owner or ADMIN | Positive order ID; no query | `200` `{order, payments}`; complete attempt history |
 | POST | `/api/orders/:id/payments/:paymentId/reconcile` | Both*; owner or ADMIN | No body or empty JSON object; no query | `200` terminal, `202` pending; `{message, order, payment}` |
+| POST | `/api/orders/:id/receipt` | Both*; owner or ADMIN | No body or empty JSON object; no query | `201` created, `200` existing; `{message, receipt: {downloadUrl, paperSize}}` |
+| GET | `/api/orders/:id/receipt` | Both*; owner or ADMIN | No query | `200` PDF attachment; `404` if not yet generated |
+| GET / HEAD | `/uploads/receipt/:date/:filename` | Public; image listener only | Canonical generated date/UUID PDF path | `200` PDF inline; HEAD without body |
 | POST | `/api/payments/midtrans/notification` | Public; signature plus provider verification | Midtrans JSON notification | `200` `{message}` after durable processing |
+
+### PDF receipts and customer QR download
+
+- Set `receiptPaperSize` through `PUT /api/cafe` to exactly `58mm` or `80mm`; default is `58mm`. Forward migration `202611190002_receipts` adds the setting without replacing existing cafe data. New orders capture width; later preference changes do not resize reprints. Legacy orders capture preference when settled or first issued.
+- CASH and verified QRIS settlement generate PDF after financial commit. Generation is best effort: a failed renderer, storage outage or process crash does not undo payment. Call authenticated `POST /api/orders/:id/receipt` to retry. It accepts no body or `{}` and no query; returns `201` created or `200` existing with `{message, receipt: {downloadUrl, paperSize}}`. The separate authenticated GET returns an existing PDF attachment without generating it.
+- Files live in `uploads/receipt/YYYY-MM-DD/<random-uuid>.pdf`, using payment paid date in `Asia/Jakarta`. Template is `src/assets/receipt.template.js`; bundled Noto Sans font/license support Indonesian/Latin text. Unsupported glyphs display `?`. No logo or remote resource fetching occurs. Long receipts paginate at the chosen physical width.
+- Content uses captured cafe/cashier/item/tax/payment facts, including original total, signed rounding, payable, CASH tender and change. Missing historical text reads `Unavailable`; invalid/missing financial snapshots return `409`, never invented history.
+- Each PDF contains a vector QR pointing directly to its own persisted public `downloadUrl` through `IMAGE_BASE_URL`. Use a publicly reachable HTTPS origin in production, not localhost. The image listener serves canonical receipt PDF GET/HEAD alongside WebP; API port does not serve uploads. QR encoding runs locally. Existing URL/file is reused unchanged; missing files regenerate using original URL and width. If origin changes, retain old hostname or redirects so printed QR codes keep working.
+- **Anyone holding the QR or URL can read receipt purchases, amounts and cashier name without login. Random UUID is bearer access, not authentication. Published files remain readable after session revocation or financial holds until removed. Avoid logging receipt URLs and retain only as long as installation policy permits.** Protected endpoints still enforce current session/role, owner-or-ADMIN scope and reconciliation guards; receipt URLs are not included in general order/payment listings.
+- Protected requests return `400` malformed input, existing `401`/`403` authentication failures, `404` absent/foreign order or missing file, `409` incomplete/unpaid/held/ambiguous/unsupported snapshots, and sanitized `503` generation/storage failure. Public missing/invalid files return `404`. Both downloads use `private, no-store` and `nosniff`. No directory listing or arbitrary uploads access.
+- Writes publish completed PDFs without overwriting prior output. Nonregular/symlink targets and PDFs missing expected header/end markers are refused; operator must quarantine/remove rejected files before retry. Stored-file checks are not a full PDF parser or checksum: internal corruption retaining those markers can go undetected. Application-owned directories/files default to `0700`/`0600`; an external file-serving proxy needs deployment-specific read permissions, not globally writable uploads. Back up PDFs and DB together. No retention worker, URL rotation endpoint or multi-host storage synchronization is provided.
 
 ### Pending orders
 
@@ -181,7 +195,7 @@ Create an order with `POST /api/orders` or replace its complete item selection w
 - Cancel using `POST /api/orders/:id/cancel` without body or with `{}` as JSON. PENDING becomes CANCELLED, retaining items/amounts; `completedAt` stays null. Repeated cancellation succeeds unchanged; COMPLETED cancellation returns `409`. No hard deletion, generic status setter or completion endpoint.
 - Lists default to `page=1`, `limit=20`, `status=PENDING`; maximum limit100 and signed-32-bit offset. Status filter accepts `PENDING`, `CANCELLED`, `COMPLETED`, `ALL`; `orderNumber` is exact match, nonempty and at most50 code points. Only ADMIN may supply `cashierId`. Unknown/duplicate/array parameters and malformed percent/UTF-8 query encoding return `400`. Known minor limitation: malformed encoding after a second literal `?` in the query can bypass raw encoding validation and become replacement text. Sort newest `createdAt` first, then descending ID. List rows include `_count.items`; detail includes items ordered by item ID. List count/rows share one consistent read; different pages are not frozen together.
 - Mutations recheck live role/session/account state under actor/order locks. Concurrent edit/cancel is serialized; concurrent full edits use last committed selection, not merge/version checks. Deadlock/write conflict returns `409`. No durable create-idempotency key: do not blindly retry POST after an uncertain response because duplicate orders are possible.
-- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. Payments complete orders through checkout below; no stock reservation, customer/table fields or receipt renderer.
+- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. Payments complete orders through checkout below; PDF receipts use captured text without fetching logos. No stock reservation or customer/table fields.
 
 Example create response with captured unit price `12.50`, quantity2 and exclusive10% tax (IDs and timestamps omitted here):
 
@@ -264,7 +278,7 @@ These existing endpoints accept multipart data with one optional file:
 - Existing legacy external URLs stay readable until replaced or cleared. Only canonical locally managed files are deleted. After successful replacement/clear or cafe deletion, the previous local file is removed. Failed database writes remove the new file and retain the previous image.
 - Uploads are ignored by Git. Back up `uploads/` with the database and keep it writable only by the application account. Local storage supports a single host; use shared storage before multi-host deployment. A process crash between filesystem and database operations can leave orphan files; filesystem writes and SQL commits are not one atomic transaction. Post-commit cleanup failures are logged for operator action.
 
-**Uploaded images are public on the image port. No bearer token is needed to read them. Only generated WebP paths are served; API routes, original uploads, directory listings, and dotfiles are not exposed there. The API port does not serve uploads.**
+**Uploaded images are public on the image port. No bearer token is needed to read them. Only generated WebP paths and canonical receipt PDF paths are served; API routes, original uploads, directory listings, and dotfiles are not exposed there. The API port does not serve uploads.**
 
 Examples (use a valid access token after completing required password change):
 
@@ -480,6 +494,7 @@ A single record is managed at ID `1`; there is no ID path parameter. Creating it
 | `taxName` | Optional; `PBJT` | Trimmed, nonempty string, at most 50 code points |
 | `taxRate` | Optional; `10.00` | Number or decimal string from 0 to 100, at most two decimal places |
 | `taxInclusive` | Optional; `false` | JSON boolean |
+| `receiptPaperSize` | Optional; `58mm` | Exactly `58mm` or `80mm`; string in JSON or multipart |
 
 Example creation (`POST /api/cafe`):
 
@@ -562,8 +577,9 @@ src/middlewares/              Authentication, roles, origin/JSON checks, limits
 src/routes/                   Auth, administrator, cafe, catalog, order and payment routers
 src/utils/                    Validation, passwords/JWT, sessions, projections
 scripts/                     Ignored local verification scripts (not shipped)
-src/image.app.js              WebP-only public image server
-uploads/                      Ignored local WebP files
+src/image.app.js              Public WebP and allowlisted receipt PDF server
+src/assets/                   PDF receipt template and licensed local font
+uploads/                      Ignored local WebP and receipt PDF files
 ```
 
 ## License

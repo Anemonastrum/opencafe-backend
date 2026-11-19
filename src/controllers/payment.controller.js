@@ -1,4 +1,5 @@
 import { prisma } from '../configs/prisma.js';
+import { tryGenerateReceipt } from '../utils/receipt.utils.js';
 import { randomUUID } from 'node:crypto';
 import { midtransConfig, chargeQris, getQrisStatus, providerObservation, qrisDetails, validNotification, verifyMidtransNotification } from '../utils/midtrans.utils.js';
 import { withUserLock, validSession } from '../utils/session.utils.js';
@@ -52,9 +53,11 @@ export const createPayment = async (req, res) => {
         return { order, payment, shouldDispatch: true };
       }
       const payment = await tx.payment.create({ data: { orderId: id, requestId: data.requestId, attemptNumber, method: 'CASH', status: 'PAID', ...snapshot, cashReceived: data.cashReceived, changeAmount: fixedMoney(received - payable), paidAt: now } });
-      const completed = await tx.order.update({ where: { id }, data: { status: 'COMPLETED', completedAt: now }, include });
+      const receiptPaperSize = order.receiptPaperSize || (await tx.cafeSetting.findUnique({ where: { id: 1 } }))?.receiptPaperSize || '58mm';
+      const completed = await tx.order.update({ where: { id }, data: { status: 'COMPLETED', completedAt: now, receiptPaperSize }, include });
       return { order: completed, payment };
     });
+    if (result.payment.status === 'PAID') await tryGenerateReceipt(id);
     if (result.shouldDispatch) {
       let details = {}, chargeObservation;
       await withPaymentActor(req, id, async () => {});
@@ -84,7 +87,7 @@ const applyProviderObservation = async (paymentId, observation, dispatchFinished
     const binding = await prisma.payment.findUnique({ where: { midtransTransactionId: observation.transaction_id } });
     const orderIds = [...new Set([found.orderId, ...(binding ? [binding.orderId] : [])])].sort((a, b) => a - b);
     try {
-      return await prisma.$transaction(async tx => {
+      const result = await prisma.$transaction(async tx => {
         for (const id of orderIds) await tx.$queryRaw`SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM payments WHERE id = ${paymentId} FOR UPDATE`;
         const payment = await tx.payment.findUnique({ where: { id: paymentId } });
@@ -118,7 +121,8 @@ const applyProviderObservation = async (paymentId, observation, dispatchFinished
           else {
             const now = new Date();
             patch.status = 'PAID'; patch.paidAt = now;
-            await tx.order.update({ where: { id: order.id }, data: { status: 'COMPLETED', completedAt: now } });
+            const receiptPaperSize = order.receiptPaperSize || (await tx.cafeSetting.findUnique({ where: { id: 1 } }))?.receiptPaperSize || '58mm';
+            await tx.order.update({ where: { id: order.id }, data: { status: 'COMPLETED', completedAt: now, receiptPaperSize } });
           }
         }
         if (!reason && payment.status === 'PENDING' && !order.paymentHoldReason && !payment.reconciliationReason && dispatchFinishedBeforeLookup && payment.dispatchFinishedAt && ['expire', 'deny', 'cancel'].includes(observation.transaction_status)) patch.status = observation.transaction_status === 'expire' ? 'EXPIRED' : 'FAILED';
@@ -133,6 +137,8 @@ const applyProviderObservation = async (paymentId, observation, dispatchFinished
         const updated = await tx.payment.update({ where: { id: paymentId }, data: patch });
         return { payment: updated, order: await tx.order.findUnique({ where: { id: order.id }, include }) };
       }, { isolationLevel: 'ReadCommitted' });
+      if (result.payment.status === 'PAID' && !result.order.paymentHoldReason && !result.payment.reconciliationReason) await tryGenerateReceipt(result.order.id);
+      return result;
     } catch (error) {
       if ((error.retryBinding || error.code === 'P2002') && retry < 2) continue;
       throw error;
