@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../configs/prisma.js';
 import { withUserLock, validSession } from '../utils/session.utils.js';
 import { parseCatalogId } from '../utils/catalog.utils.js';
+import { legacyPaymentHold } from '../utils/payment.utils.js';
 import { validateOrder, parseOrderQuery, calculateOrder, validateOrderSnapshot, serializeOrder, orderError, handleOrderError } from '../utils/order.utils.js';
 
 const include={items:{orderBy:{id:'asc'}}};
@@ -19,7 +20,7 @@ const lockedOrder = async(tx,id,user)=>{
   return owned(await tx.order.findUnique({where:{id},include}),user);
 };
 const editable = async(tx,order)=>{
-  if (order.status!=='PENDING' || await tx.payment.count({where:{orderId:order.id,status:{in:['PENDING','PAID']}}})) throw orderError('Order cannot be changed in its current state',409);
+  if (order.paymentHoldReason || await legacyPaymentHold(tx,order.id) || order.status!=='PENDING' || await tx.payment.count({where:{orderId:order.id,status:{in:['PENDING','PAID']}}})) throw orderError('Order cannot be changed in its current state',409);
 };
 const newLines = async(tx,selection,existing=[])=>{
   const lines=[];
@@ -86,6 +87,7 @@ export const cancelOrder = async(req,res)=>{
   try {
     const order=await withActor(req,async(tx,user)=>{
       const current=await lockedOrder(tx,id,user);
+      if (current.paymentHoldReason) throw orderError('Order requires payment reconciliation',409);
       if (current.status==='CANCELLED') return serializeOrder(current);
       await editable(tx,current);
       return serializeOrder(await tx.order.update({where:{id},data:{status:'CANCELLED'},include}));

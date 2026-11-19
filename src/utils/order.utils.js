@@ -71,7 +71,7 @@ const displayMoney = value => {
 const money=['subtotalAmount','taxRate','taxAmount','totalAmount'];
 export const serializeOrder = order => {
   const result={};
-  for (const key of ['id','orderNumber','status','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','taxName','taxInclusive','createdAt','updatedAt','completedAt',...money]) {
+  for (const key of ['id','orderNumber','status','paymentHoldReason','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','taxName','taxInclusive','createdAt','updatedAt','completedAt',...money]) {
     if (order[key]!==undefined) result[key]=money.includes(key)?displayMoney(order[key]):order[key];
   }
   if (order.items) result.items=order.items.map(item=>({id:item.id,productId:item.productId,productName:item.productName,unitPrice:displayMoney(item.unitPrice),quantity:item.quantity,subtotal:displayMoney(item.subtotal)}));

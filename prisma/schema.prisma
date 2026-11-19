@@ -160,6 +160,7 @@ model Order {
   id          Int         @id @default(autoincrement())
   orderNumber String      @unique @map("order_number") @db.VarChar(50)
   status      OrderStatus @default(PENDING)
+  paymentHoldReason String? @map("payment_hold_reason") @db.VarChar(100)
 
   // Transaction amounts
   subtotalAmount Decimal @map("subtotal_amount") @db.Decimal(12, 2)
@@ -231,6 +232,14 @@ model Payment {
   order   Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   attemptNumber Int @default(1) @map("attempt_number")
+  requestId String? @map("request_id") @db.Char(36)
+  orderTotalAmount Decimal? @map("order_total_amount") @db.Decimal(12, 2)
+  roundingAdjustment Decimal? @map("rounding_adjustment") @db.Decimal(12, 2)
+  dispatchClaimedAt DateTime? @map("dispatch_claimed_at")
+  dispatchFinishedAt DateTime? @map("dispatch_finished_at")
+  reconciliationReason String? @map("reconciliation_reason") @db.VarChar(100)
+  latestProviderObservation Json? @map("latest_provider_observation")
+  settlementObservation Json? @map("settlement_observation")
 
   // Payment details
   method PaymentMethod
@@ -265,6 +274,7 @@ model Payment {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([orderId, attemptNumber])
+  @@unique([orderId, requestId])
   @@index([status])
   @@map("payments")
 }

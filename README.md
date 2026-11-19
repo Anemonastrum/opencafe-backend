@@ -23,7 +23,7 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 - Strict field allowlists, bounded pagination, JSON validation, and authentication rate limits.
 - Graceful HTTP server shutdown and Prisma disconnection on `SIGINT`/`SIGTERM`.
 
-Pending-order APIs and tax calculations are implemented. Payment APIs, checkout/completion, receipt rendering and Midtrans/QRIS integration are **not implemented**. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
+Pending-order APIs, exact tax calculations, CASH checkout and native Midtrans Core API QRIS payments are implemented, including payment replay, signed notifications and protected status reconciliation. Successful payment completes its order atomically. Receipt rendering, refunds, payment force-release and background reconciliation are **not implemented**. Images are uploaded locally and served publicly; remote images are never fetched. No public registration, user deletion, administrator-management endpoints beyond registration, or session-listing endpoint exists.
 
 ## Setup
 
@@ -153,6 +153,10 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | GET | `/api/orders/:id` | Both*; owner or ADMIN | Positive order ID | `200` order with items directly |
 | PUT | `/api/orders/:id` | Both*; owner or ADMIN | JSON full replacement `items` | `200` `{message, order}`; pending only |
 | POST | `/api/orders/:id/cancel` | Both*; owner or ADMIN | No body or empty JSON object | `200` `{message, order}`; retains history |
+| POST | `/api/orders/:id/payments` | Both*; owner or ADMIN | `requestId`, `method`; CASH requires `cashReceived` | `201` new payment, `200` replay, `202` unresolved; `{message, order, payment}` |
+| GET | `/api/orders/:id/payments` | Both*; owner or ADMIN | Positive order ID; no query | `200` `{order, payments}`; complete attempt history |
+| POST | `/api/orders/:id/payments/:paymentId/reconcile` | Both*; owner or ADMIN | No body or empty JSON object; no query | `200` terminal, `202` pending; `{message, order, payment}` |
+| POST | `/api/payments/midtrans/notification` | Public; signature plus provider verification | Midtrans JSON notification | `200` `{message}` after durable processing |
 
 ### Pending orders
 
@@ -177,7 +181,7 @@ Create an order with `POST /api/orders` or replace its complete item selection w
 - Cancel using `POST /api/orders/:id/cancel` without body or with `{}` as JSON. PENDING becomes CANCELLED, retaining items/amounts; `completedAt` stays null. Repeated cancellation succeeds unchanged; COMPLETED cancellation returns `409`. No hard deletion, generic status setter or completion endpoint.
 - Lists default to `page=1`, `limit=20`, `status=PENDING`; maximum limit100 and signed-32-bit offset. Status filter accepts `PENDING`, `CANCELLED`, `COMPLETED`, `ALL`; `orderNumber` is exact match, nonempty and at most50 code points. Only ADMIN may supply `cashierId`. Unknown/duplicate/array parameters and malformed percent/UTF-8 query encoding return `400`. Known minor limitation: malformed encoding after a second literal `?` in the query can bypass raw encoding validation and become replacement text. Sort newest `createdAt` first, then descending ID. List rows include `_count.items`; detail includes items ordered by item ID. List count/rows share one consistent read; different pages are not frozen together.
 - Mutations recheck live role/session/account state under actor/order locks. Concurrent edit/cancel is serialized; concurrent full edits use last committed selection, not merge/version checks. Deadlock/write conflict returns `409`. No durable create-idempotency key: do not blindly retry POST after an uncertain response because duplicate orders are possible.
-- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. No payment, completion, stock reservation, customer/table fields or receipt renderer in this phase.
+- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. Payments complete orders through checkout below; no stock reservation, customer/table fields or receipt renderer.
 
 Example create response with captured unit price `12.50`, quantity2 and exclusive10% tax (IDs and timestamps omitted here):
 
@@ -198,6 +202,45 @@ Example create response with captured unit price `12.50`, quantity2 and exclusiv
   }
 }
 ```
+
+### CASH and QRIS payments
+
+Configure server-side secrets in ignored `.env`, never in client code or tracked files:
+
+```dotenv
+MIDTRANS_ENV=sandbox
+MIDTRANS_SERVER_KEY=
+MIDTRANS_SIGNATURE_SECRET_KEY=
+```
+
+`MIDTRANS_ENV` accepts `sandbox` (default) or explicitly configured `production`, selecting fixed HTTPS Midtrans hosts. Missing/invalid provider settings disable QRIS, not CASH. API authorization uses Server Key; notifications use the separate Signature Secret Key, not Client Key or Server Key. See [Midtrans access keys](https://docs.midtrans.com/docs/access-keys). No SDK, Snap token or hosted checkout is used.
+
+Create CASH payment:
+
+```json
+{"requestId":"123e4567-e89b-42d3-a456-426614174000","method":"CASH","cashReceived":"20000.00"}
+```
+
+Create QRIS payment:
+
+```json
+{"requestId":"123e4567-e89b-42d3-a456-426614174001","method":"QRIS"}
+```
+
+- Both use `POST /api/orders/:id/payments`, JSON only, exact field allowlists. `requestId` is a canonical lowercase UUID. Same order/key and normalized method/tender returns existing attempt without redispatch; different fields with same key return `409`. Use a new key only after a verified terminal failure permits a new attempt. Never retry an uncertain charge under a new key.
+- CASHIER accesses own orders; ADMIN accesses any. Missing/foreign resources return `404`. Live account/session/role and password-change state are rechecked after acquiring order lock and before protected payment disclosure. Provider results persist even if initiating employee loses access during transport.
+- Checkout uses captured item/tax snapshots, not current catalog prices or availability. Payment `orderTotalAmount` retains exact order total; `amount` is payable whole rupiah, rounded half up; signed `roundingAdjustment = amount - orderTotalAmount`. Order totals/items remain unchanged. Example: `12.49` becomes `12.00` with `-0.49`; `12.50` becomes `13.00` with `0.50`.
+- Monetary responses use fixed two-decimal strings. `cashReceived` accepts plain decimal string or JSON number, 0–9999999999.99 with at most two decimals. Raw numeric exponent/excess precision is rejected before Number rounding. Tender must cover payable; exact change is `cashReceived - amount`. CASH accepts zero payable and marks payment `PAID`, order `COMPLETED`, `paidAt` and `completedAt` in one transaction. Rounded payable overflow returns `400`.
+- QRIS accepts payable IDR1–10,000,000 inclusive; issuer/merchant limits may be stricter. One PENDING attempt and dispatch claim commit before native charge request; no SQL transaction spans network work. Response includes safe QR image URL (`qrisQrUrl`) and/or QR payload when available, provider IDs and expiry when supplied. QRIS `201` means attempt created, not paid. `202` means pending without usable QR details or unresolved creation; reconcile that attempt, never resend it.
+- `GET /api/orders/:id/payments` returns all attempts ordered by `attemptNumber`, with request ID, method/status, amounts, cash/change, QR details, provider IDs, timestamps and safe reconciliation reason. No provider request occurs. Legacy new snapshot fields remain null; history is never reconstructed from current catalog.
+- `POST /api/orders/:id/payments/:paymentId/reconcile` accepts no fields, requires QRIS and fetches authoritative provider status. Pending returns `202`; verified terminal state `200`; conflict `409` only after evidence/hold commits. Transport failure returns `502`; configuration or recognized lock contention may return `503`. Reconciliation does not charge again. No public generic status setter exists.
+- Notification signature is SHA512 of original `order_id + status_code + gross_amount + SignatureSecretKey`, compared timing-safely. A valid signature does not authenticate supplied transaction status: handler independently retrieves current provider status and compares QRIS method, IDR currency, amount and transaction identity before changing money state. Duplicate notifications requery; stale failure cannot regress PAID. Notifications return `400` malformed, `403` bad signature, `404` unknown signed order, `503` transient provider/DB failure, or `200` after processing, including durably recorded financial conflicts.
+- Settlement completes an eligible pending order atomically. Verified expiry maps to EXPIRED; deny/cancel to FAILED, only when fresh lookup began after dispatch finished locally. Local clock expiry, provider not-found and transport failure never release an unresolved attempt. Late settlement after terminal failure/replacement, invalid financial identity, provider transaction-ID collision, unsupported refund/status or fraud review retains bounded financial evidence and places order on reconciliation hold. Previous successful payment is never overwritten.
+- Pending/paid attempts and `paymentHoldReason` block additional checkout, edits and cancellation. Legacy attempts lacking immutable snapshots also block changes, exposing `LEGACY_PAYMENT_REQUIRES_RECONCILIATION` through payment-history projection. Incoherent stored snapshots require operator investigation, not fabricated backfill. Forward migration adds nullable fields and replay uniqueness without rewriting old financial values.
+
+**Availability restriction:** A crash after dispatch claim but before durable dispatch completion can leave that order blocked indefinitely, even if provider later reports not found or a terminal failure. There is no force-clear, resend, worker, refund or supported recovery operation in this scope. Do not manually clear holds or create replacement payments without a separately reviewed recovery procedure.
+
+For deployment, route HTTPS callback URL to `POST /api/payments/midtrans/notification` and register it in the matching Midtrans environment only after testing ingress/signatures. Keep API loopback-bound behind your configured proxy. No tunnel/dashboard registration is automatic. Sandbox QR codes must only be paid through the [official sandbox simulator](https://simulator.sandbox.midtrans.com/v2/qris/index), never a real bank/payment app. Public provider-to-webhook delivery requires separate verification; signed local callbacks or protected reconciliation do not prove it.
 
 ### Image uploads
 
@@ -467,6 +510,8 @@ Handled errors generally use `{ "message": "..." }`; forced-password-change erro
 | `413` | Uploaded image or multipart text exceeds size limits |
 | `429` | Authentication rate limit, hash-concurrency budget, or image-upload admission limit reached |
 | `500` | Server/database error; unsupported JSON charset/encoding currently also falls through to the generic server error handler |
+| `502` | Midtrans request/status unavailable; unresolved payment must be reconciled, not recharged |
+| `503` | Midtrans configuration unavailable, retryable payment contention, or notification processing unavailable |
 
 ## Checks
 
@@ -492,6 +537,17 @@ node --import tsx --test scripts/catalog.integration.js
 
 Integration checks require explicit test-target acknowledgement, create uniquely named fixtures in `pos_auth_test`, and clean only their own rows/files. Credentials come from the environment or ignored `.env`. The acknowledgement must match `DATABASE_HOST:DATABASE_PORT/DATABASE_NAME` (port defaults to 3306). Never point fixture checks at production or reset existing databases to satisfy a test. Catalog verification includes role/forced-change guards, validation, filters/pagination, category assignment/deletion races, unavailable retention, images/replacements and rollback cleanup.
 
+Local payment checks, when present:
+
+```sh
+npm test
+node --import tsx --test scripts/payment.integration.js
+node scripts/payment-migration.js
+node --import tsx scripts/payment.sandbox.js --ack-sandbox --reconcile --expect-paid
+```
+
+These scripts are ignored local artifacts, not available in fresh clones. Offline tests cover money/signatures/bounded transport; integration checks exercise mounted HTTP against an explicitly allowlisted test schema with mocked provider HTTP and fixture-owned cleanup. Target verification compares Prisma CLI and runtime database identities before writes. Migration rehearsal uses connection-local temporary tables and preserves legacy values; it is distinct from fresh migration deployment. Sandbox check deliberately retains its fixture and real sandbox provider IDs for repeatable readback; it never runs from ordinary `npm test`. Never point fixture checks at production or change their target allowlist without authorization. Genuine sandbox charge/status/simulator settlement and persisted PAID/COMPLETED readback have been exercised; public provider-to-webhook delivery has not.
+
 ## Project layout
 
 ```text
@@ -503,7 +559,7 @@ src/server.js                 HTTP listener and shutdown handlers
 src/configs/prisma.js         MariaDB adapter and generated Prisma client
 src/controllers/              Direct Prisma request handlers
 src/middlewares/              Authentication, roles, origin/JSON checks, limits
-src/routes/                   Auth, administrator, cafe, product and category routers
+src/routes/                   Auth, administrator, cafe, catalog, order and payment routers
 src/utils/                    Validation, passwords/JWT, sessions, projections
 scripts/                     Ignored local verification scripts (not shipped)
 src/image.app.js              WebP-only public image server
