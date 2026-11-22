@@ -2,6 +2,7 @@ import express from 'express';
 import {
   createCafeSetting,
   getCafeSetting,
+  getCafeBranding,
   updateCafeSetting,
   deleteCafeSetting,
 } from '../controllers/cafe.controller.js';
@@ -11,6 +12,7 @@ import { authenticate, requirePasswordChangeComplete, requireRoles } from '../mi
 import { uploadImage } from '../middlewares/upload.middleware.js';
 
 const router = express.Router();
+router.get('/branding', getCafeBranding);
 router.use(authenticate, requirePasswordChangeComplete);
 
 router.get('/', getCafeSetting);

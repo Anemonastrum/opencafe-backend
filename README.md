@@ -135,6 +135,7 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | PUT | `/api/admin/cashiers/:id` | ADMIN* | Partial `name`, `username`, `isActive`; optional file `image` or JSON `imageUrl: null` | `200` `{message, cashier}` |
 | PUT | `/api/admin/cashiers/:id/password` | ADMIN* | `newPassword` chosen by administrator | `200` `{message}` |
 | GET | `/api/cafe` | Both* | None | `200` cafe settings object directly |
+| GET | `/api/cafe/branding` | Public | None | `200` `{name, logoUrl}` only; `404` when settings absent |
 | POST | `/api/cafe` | ADMIN* | `name`, `address`; optional cafe fields and file `logo` | `201` `{message, cafeSetting}` |
 | PUT | `/api/cafe` | ADMIN* | Partial cafe fields; optional file `logo` | `200` `{message, cafeSetting}` |
 | DELETE | `/api/cafe` | ADMIN* | None | `200` `{message}` |
@@ -162,6 +163,8 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | POST | `/api/payments/midtrans/notification` | Public; signature plus provider verification | Midtrans JSON notification | `200` `{message}` after durable processing |
 
 ### Administrator sales reports and exports
+
+Public `GET /api/cafe/branding` exposes only cafe name and logo URL for sign-in/sidebar/browser branding. It selects no address, tax, receipt, account or financial data. Responses use `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`; unavailable settings return `404`, database failures return sanitized `500`. Full cafe settings and every cafe write retain existing authentication, password-change and role checks.
 
 | Method | Path | Access | Success |
 | --- | --- | --- | --- |

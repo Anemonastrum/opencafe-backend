@@ -31,6 +31,20 @@ export const createCafeSetting = async (req, res) => {
   } catch (error) { if (saved) await removeImage(saved.url); return handleError(res, error); }
 };
 
+export const getCafeBranding = async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  try {
+    const branding = await prisma.cafeSetting.findUnique({
+      where: { id: 1 },
+      select: { name: true, logoUrl: true },
+    });
+    if (!branding) return res.status(404).json({ message: 'Cafe settings not found' });
+    return res.json(branding);
+  } catch {
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // READ
 export const getCafeSetting = async (req, res) => {
   try {
