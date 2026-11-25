@@ -8,6 +8,7 @@ import { setImmediate } from 'node:timers/promises';
 import { receiptQr, receiptError } from '../utils/receipt.utils.js';
 
 const font = fileURLToPath(new URL('./NotoSans-Regular.ttf', import.meta.url));
+const boldFont = fileURLToPath(new URL('./NotoSans-Bold.ttf', import.meta.url));
 const mm = 72 / 25.4;
 const localTime = value => new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Jakarta',dateStyle:'short',timeStyle:'medium'}).format(new Date(value));
 
@@ -64,18 +65,21 @@ export const renderReceipt = async (data, paperSize, receiptUrl) => {
       return lines;
     };
     const logo=await receiptLogo(data.logoUrl);
-    add(data.cafeName,'center');add(data.address,'center');add('--------------------------------');
+    fields.push({value:data.cafeName,align:'center',heading:true});add(data.address,'center');fields.push({separator:true});
     pair('Ordered',localTime(data.createdAt));pair('Paid',`${localTime(data.payment.paidAt)} WIB`);pair('Cashier',data.cashierName);
+    fields.push({separator:true});
     for(const item of data.items){add(item.productName);pair(`${item.quantity} x IDR ${item.unitPrice}`,`IDR ${item.subtotal}`);await setImmediate();}
-    add('--------------------------------');
+    fields.push({separator:true});
     const total=(label,value)=>pair(label,`IDR ${value}`);
     total('Subtotal',data.subtotal);
     total(`${data.taxName} ${data.taxRate}% (${data.taxInclusive?'included':'added'})`,data.taxAmount);
-    total('PAYABLE',data.payment.amount);
+    total('Total',data.payment.amount);
     pair('Method',data.payment.method);
     if(data.payment.method==='CASH'){total('Cash received',data.payment.cashReceived);total('Change',data.payment.changeAmount);}
     for(const field of fields) {
-      if(field.label===undefined)for(const text of await wrap(field.value,contentWidth))rows.push({text,align:field.align});
+      doc.font(field.heading?boldFont:font).fontSize(field.heading?10:8);
+      if(field.separator)rows.push({separator:true});
+      else if(field.label===undefined)for(const text of await wrap(field.value,contentWidth))rows.push({text,align:field.align,heading:field.heading});
       else {
         const leftWidth=Math.min(doc.widthOfString(field.label),contentWidth-Math.min(doc.widthOfString(field.value),contentWidth*0.7)-6),rightWidth=contentWidth-leftWidth-6;
         const left=await wrap(field.label,leftWidth),right=await wrap(field.value,rightWidth);
@@ -84,20 +88,23 @@ export const renderReceipt = async (data, paperSize, receiptUrl) => {
       if(rows.length>12000)throw receiptError();
     }
     const qr=receiptQr(receiptUrl), qrSize=(qr.size+8)*0.6*mm, footer=qrSize+8;
-    const lineHeight=12,maxHeight=14000,maxRows=Math.floor((maxHeight-2*margin-footer-(logo?46:0))/lineHeight);
+    const lineHeight=12,maxHeight=14000,headingExtra=rows.filter(row=>row.heading).length*4;
+    const maxRows=Math.floor((maxHeight-2*margin-footer-(logo?46:0)-headingExtra)/lineHeight);
     const pages=Math.ceil(rows.length/maxRows);
     if(pages>16)throw receiptError();
     for(let page=0;page<pages;page++){
       const part=rows.slice(page*maxRows,(page+1)*maxRows),last=page===pages-1;
       const logoHeight=page===0&&logo?46:0;
-      const height=2*margin+logoHeight+part.length*lineHeight+(last?footer:0);
+      const height=2*margin+logoHeight+part.reduce((height,row)=>height+(row.heading?16:lineHeight),0)+(last?footer:0);
       doc.addPage({size:[width,height],margin:0});doc.font(font).fontSize(8);
       let y=margin;
       if(logoHeight){doc.image(logo,(width-64)/2,y,{fit:[64,40],align:'center',valign:'center'});y+=logoHeight;}
       for(const row of part){
+        if(row.separator){doc.save().lineWidth(0.5).moveTo(margin,y+6).lineTo(width-margin,y+6).stroke().restore();y+=lineHeight;continue;}
+        doc.font(row.heading?boldFont:font).fontSize(row.heading?10:8);
         doc.text(row.text,margin,y,{width:row.leftWidth??contentWidth,align:row.align||'left',lineBreak:false});
         if(row.right)doc.text(row.right,width-margin-row.rightWidth,y,{width:row.rightWidth,align:'right',lineBreak:false});
-        y+=lineHeight;
+        y+=row.heading?16:lineHeight;
       }
       if(last){
         y+=4;const x=(width-qrSize)/2,cell=qrSize/(qr.size+8);
