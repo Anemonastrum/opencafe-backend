@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../configs/prisma.js';
 import { withUserLock, validSession } from '../utils/session.utils.js';
 import { parseCatalogId } from '../utils/catalog.utils.js';
@@ -44,7 +44,7 @@ export const createOrder = async(req,res)=>{
       if (!cafe) throw orderError('Cafe settings required before taking orders',409);
       const tax=cafe.taxEnabled?{taxName:cafe.taxName,taxRate:cafe.taxRate,taxInclusive:cafe.taxInclusive}:{taxName:null,taxRate:'0.00',taxInclusive:false};
       const {items,...amounts}=calculateOrder(await newLines(tx,data),tax);
-      return tx.order.create({data:{orderNumber:`OC-${randomUUID()}`,status:'PENDING',cashierId:user.id,receiptCashierName:user.name,receiptCafeName:cafe.name,receiptCafeAddress:cafe.address,receiptLogoUrl:cafe.logoUrl,receiptPaperSize:cafe.receiptPaperSize,...tax,...amounts,items:{create:items}},include});
+      return tx.order.create({data:{orderNumber:randomBytes(8).toString('hex'),status:'PENDING',cashierId:user.id,receiptCashierName:user.name,receiptCafeName:cafe.name,receiptCafeAddress:cafe.address,receiptLogoUrl:cafe.logoUrl,receiptPaperSize:cafe.receiptPaperSize,...tax,...amounts,items:{create:items}},include});
     });
     return res.status(201).json({message:'Order created successfully',order:serializeOrder(order)});
   } catch(error) { return handleOrderError(res,error); }
