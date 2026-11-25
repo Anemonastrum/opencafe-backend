@@ -597,6 +597,29 @@ node --import tsx scripts/payment.sandbox.js --ack-sandbox --reconcile --expect-
 
 These scripts are ignored local artifacts, not available in fresh clones. Offline tests cover money/signatures/bounded transport; integration checks exercise mounted HTTP against an explicitly allowlisted test schema with mocked provider HTTP and fixture-owned cleanup. Target verification compares Prisma CLI and runtime database identities before writes. Migration rehearsal uses connection-local temporary tables and preserves legacy values; it is distinct from fresh migration deployment. Sandbox check deliberately retains its fixture and real sandbox provider IDs for repeatable readback; it never runs from ordinary `npm test`. Never point fixture checks at production or change their target allowlist without authorization. Genuine sandbox charge/status/simulator settlement and persisted PAID/COMPLETED readback have been exercised; public provider-to-webhook delivery has not.
 
+## Persistent notifications
+
+Apply migrations and regenerate Prisma before starting updated backend. No new dependency or external cron needed. `notifications` stores per-recipient read state; `daily_notification_reports` stores shared immutable daily summaries. Importing `app` does not start scheduler; `npm start` starts it after both HTTP listeners are ready. Shutdown stops timer and awaits active generation before Prisma disconnect.
+
+All routes require Bearer authentication, completed password change and current ADMIN/CASHIER authority. Responses use `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`. IDs are strings; timestamps ISO UTC; business dates use `YYYY-MM-DD`. Money remains exact two-decimal strings.
+
+| Method | Path | Input / response |
+|---|---|---|
+| GET | `/api/notifications` | Optional `page=1`, `limit=20` (max100), `unread=true\|false`; `{notifications,total,page,limit}` |
+| GET | `/api/notifications/unread-count` | No query/body; `{unreadCount}` |
+| PATCH | `/api/notifications/read-all` | No query; absent body or empty JSON object; `{message,updatedCount}` |
+| PATCH | `/api/notifications/:id/read` | Positive canonical Int ID, no query; absent body or empty JSON object; `{message,notification}` |
+
+List newest ID first; rows and total share a request snapshot, not cross-request pagination snapshot. Each notification exposes only `{id,type,data,readAt,createdAt}`. First read timestamp remains unchanged on replay. Read-all updates only own currently role-visible unread records. ADMIN sees own payment/daily records; CASHIER sees own payment records only. Demotion hides daily contents and counts; promotion grants no other recipients' records. Missing/foreign/role-hidden ID returns404. Strict malformed/duplicate/unknown query or body returns400; live invalid session401, role/password denial403, handler storage failure503. Shared authentication middleware retains its existing statuses.
+
+`PAYMENT_SUCCESS` data: `{orderId,paymentId,orderNumber,amount,method,paidAt}`. First successful CASH or verified QRIS settlement notifies order-owning cashier, even when initiating payer is admin or owner is inactive. No pending/failed/expired/held-conflict event, duplicate settlement, or historical payment backfill. Notification and **local** payment/order/evidence settlement commit together. If notification storage fails, local settlement rolls back and request is retryable. QRIS provider funds may already be charged and cannot be rolled back by this transaction; provider redelivery or protected reconciliation must complete local settlement. Local DB concurrency retries never redispatch provider charge. Receipt generation remains independent after commit.
+
+`DAILY_SALES_REPORT` data includes `{businessDate,reportId,status,generatedAt,summary,review,filters}`. Backend checks every60seconds, normally generating shortly after `00:00 Asia/Jakarta` for previous calendar day. First activation durably saves yesterday in `notification_schedule_state` before report computation, so a failed first generation survives midnight and restart. Later downtime catches missed days oldest-first, max7days/tick. Multiple instances elect one report/fanout using DB uniqueness. Zero-sales days still notify; zero eligible admins still save progress. Recipients are active ADMIN accounts without forced password change at generation; no backfill for admins added/promoted later. Report snapshot reuses exact bounded sales engine and never changes after generation; late settlements or later holds may make live reports differ. `generatedAt` means snapshot capture, not insertion/delivery time.
+
+Deterministic sales-limit422 saves `DAILY_SALES_REPORT_UNAVAILABLE` with `status: UNAVAILABLE` and `reason: REPORT_LIMIT_EXCEEDED`, not invented zero totals. Other failures retry next tick without partial fanout. Caps:1000eligible admins/day,16KiB per notification data,64KiB shared report data; recipient overflow logs sanitized failure and retries. Up to60seconds normal polling delay is not a deadline during downtime/overload. Records retained indefinitely; operator owns capacity/retention policy. No create/delete endpoint, public scheduler trigger, email, push, WebSocket or SSE.
+
+Local notification checks (ignored, not shipped/CI coverage): `node --test scripts/notification.check.js`, `node --import tsx --test scripts/notification.integration.js`, `node --import tsx scripts/notification-startup.js`. SQL daily checks scope fanout to fixture users; startup uses a controlled scheduler DB facade to avoid generating real-user notifications. Do not run normal startup smoke against shared data without accounting for immediate scheduler fanout.
+
 ## Project layout
 
 ```text

@@ -7,6 +7,7 @@ import productRoutes from './routes/product.route.js';
 import categoryRoutes from './routes/category.route.js';
 import orderRoutes from './routes/order.route.js';
 import paymentRoutes from './routes/payment.route.js';
+import notificationRoutes from './routes/notification.route.js';
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // stop send error to client if json is too large or invalid
 app.use((err, req, res, next) => {

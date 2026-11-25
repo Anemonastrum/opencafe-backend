@@ -61,6 +61,7 @@ model User {
 
   orders Order[]
   sessions AuthSession[]
+  notifications Notification[]
 
   @@map("users")
 }
@@ -280,4 +281,52 @@ model Payment {
   @@unique([orderId, requestId])
   @@index([status])
   @@map("payments")
+}
+
+enum NotificationType {
+  PAYMENT_SUCCESS
+  DAILY_SALES_REPORT
+  DAILY_SALES_REPORT_UNAVAILABLE
+}
+
+enum DailyNotificationReportStatus {
+  READY
+  UNAVAILABLE
+}
+
+model Notification {
+  id Int @id @default(autoincrement())
+  recipientUserId Int @map("recipient_user_id")
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  type NotificationType
+  eventKey String @map("event_key") @db.VarChar(100)
+  data Json
+  reportId Int? @map("report_id")
+  report DailyNotificationReport? @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  readAt DateTime? @map("read_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([recipientUserId, eventKey])
+  @@index([recipientUserId, id])
+  @@index([recipientUserId, readAt, id])
+  @@map("notifications")
+}
+
+model DailyNotificationReport {
+  id Int @id @default(autoincrement())
+  businessDate DateTime @unique @map("business_date") @db.Date
+  generatedAt DateTime @map("generated_at")
+  status DailyNotificationReportStatus
+  data Json
+  notifications Notification[]
+
+  @@map("daily_notification_reports")
+}
+
+// Durable activation boundary; do not move when first report generation fails.
+model NotificationScheduleState {
+  id Int @id
+  firstBusinessDate DateTime @map("first_business_date") @db.Date
+
+  @@map("notification_schedule_state")
 }

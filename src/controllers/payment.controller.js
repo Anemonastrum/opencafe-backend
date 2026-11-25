@@ -1,5 +1,6 @@
 import { prisma } from '../configs/prisma.js';
 import { tryGenerateReceipt } from '../utils/receipt.utils.js';
+import { createPaymentSuccessNotification, retryNotificationTransaction } from '../utils/notification.utils.js';
 import { randomUUID } from 'node:crypto';
 import { midtransConfig, chargeQris, getQrisStatus, providerObservation, qrisDetails, validNotification, verifyMidtransNotification } from '../utils/midtrans.utils.js';
 import { withUserLock, validSession } from '../utils/session.utils.js';
@@ -16,13 +17,13 @@ const owned = (order, user) => {
   if (!order || (user.role !== 'ADMIN' && order.cashierId !== user.id)) throw paymentError('Order not found', 404);
   return order;
 };
-const withPaymentActor = (req, orderId, callback) => withUserLock(req.user.id, async (tx, user) => {
+const withPaymentActor = (req, orderId, callback) => retryNotificationTransaction(() => withUserLock(req.user.id, async (tx, user) => {
   await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`;
   await checkActor(tx, req, user);
   const order = owned(await tx.order.findUnique({ where: { id: orderId }, include }), user);
   order.paymentHoldReason ||= await legacyPaymentHold(tx, orderId);
   return callback(tx, order, user);
-});
+}));
 const response = (res, result, status = 200) => res.status(status).json({ message: result.payment.status === 'PAID' ? 'Payment completed successfully' : 'Payment recorded', order: serializeOrder(result.order), payment: serializePayment(result.payment) });
 
 export const createPayment = async (req, res) => {
@@ -55,6 +56,7 @@ export const createPayment = async (req, res) => {
       const payment = await tx.payment.create({ data: { orderId: id, requestId: data.requestId, attemptNumber, method: 'CASH', status: 'PAID', ...snapshot, cashReceived: data.cashReceived, changeAmount: fixedMoney(received - payable), paidAt: now } });
       const receiptPaperSize = order.receiptPaperSize || (await tx.cafeSetting.findUnique({ where: { id: 1 } }))?.receiptPaperSize || '58mm';
       const completed = await tx.order.update({ where: { id }, data: { status: 'COMPLETED', completedAt: now, receiptPaperSize }, include });
+      await createPaymentSuccessNotification(tx, completed, payment);
       return { order: completed, payment };
     });
     if (result.payment.status === 'PAID') await tryGenerateReceipt(id);
@@ -80,7 +82,7 @@ export const createPayment = async (req, res) => {
   } catch (error) { return handlePaymentError(res, error); }
 };
 // Verified provider evidence is system-owned; employee revocation must not discard it.
-const applyProviderObservation = async (paymentId, observation, dispatchFinishedBeforeLookup) => {
+const applyProviderObservation = (paymentId, observation, dispatchFinishedBeforeLookup) => retryNotificationTransaction(async () => {
   for (let retry = 0; retry < 3; retry++) {
     const found = await prisma.payment.findUnique({ where: { id: paymentId } });
     if (!found) throw paymentError('Payment not found', 404);
@@ -135,6 +137,7 @@ const applyProviderObservation = async (paymentId, observation, dispatchFinished
           if (currentBinding && currentBinding.id !== paymentId && !currentBinding.reconciliationReason) await tx.payment.update({ where: { id: currentBinding.id }, data: { reconciliationReason: reason } });
         }
         const updated = await tx.payment.update({ where: { id: paymentId }, data: patch });
+        if (patch.status === 'PAID') await createPaymentSuccessNotification(tx, order, updated);
         return { payment: updated, order: await tx.order.findUnique({ where: { id: order.id }, include }) };
       }, { isolationLevel: 'ReadCommitted' });
       if (result.payment.status === 'PAID' && !result.order.paymentHoldReason && !result.payment.reconciliationReason) await tryGenerateReceipt(result.order.id);
@@ -144,7 +147,7 @@ const applyProviderObservation = async (paymentId, observation, dispatchFinished
       throw error;
     }
   }
-};
+});
 const refreshPayment = async payment => {
   const current = await prisma.payment.findUnique({ where: { id: payment.id } });
   const finishedBeforeLookup = Boolean(current.dispatchFinishedAt);
