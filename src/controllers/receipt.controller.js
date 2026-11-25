@@ -5,7 +5,7 @@ import { ensureReceipt, paidReceipt, readReceipt, receiptPathname, receiptError 
 const authorize = (req, id) => withUserLock(req.user.id, async (tx, user) => {
   await tx.$queryRaw`SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
   const session = await tx.authSession.findUnique({where:{id:req.authSession}});
-  if (!validSession(session,user) || !['ADMIN','CASHIER'].includes(user.role) || user.mustChangePassword) throw Object.assign(Error('Receipt permission required'),{status:403});
+  if (!validSession(session,user) || !['ADMIN','CASHIER'].includes(user.role)) throw Object.assign(Error('Receipt permission required'),{status:403});
   const order = await tx.order.findUnique({where:{id},include:{items:{orderBy:{id:'asc'}},payments:true}});
   if (!order || (user.role !== 'ADMIN' && order.cashierId !== user.id)) throw receiptError(404);
   paidReceipt(order);

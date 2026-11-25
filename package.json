@@ -16,6 +16,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "tsx src/server.js",
+    "setup": "tsx src/setup.js && prisma generate",
     "test": "tsx --test scripts/*.check.js",
     "test:integration": "tsx --test --test-concurrency=1 scripts/*.integration.js",
     "postinstall": "prisma skills sync || exit 0"

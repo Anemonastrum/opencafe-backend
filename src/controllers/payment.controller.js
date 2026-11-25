@@ -11,7 +11,7 @@ import { paymentError, handlePaymentError, validatePayment, paymentAmounts, vali
 const include = { items: { orderBy: { id: 'asc' } } };
 const checkActor = async (tx, req, user) => {
   const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
-  if (!validSession(session, user) || !['ADMIN', 'CASHIER'].includes(user.role) || user.mustChangePassword) throw paymentError('Payment permission required', 403);
+  if (!validSession(session, user) || !['ADMIN', 'CASHIER'].includes(user.role)) throw paymentError('Payment permission required', 403);
 };
 const owned = (order, user) => {
   if (!order || (user.role !== 'ADMIN' && order.cashierId !== user.id)) throw paymentError('Order not found', 404);

@@ -6,7 +6,7 @@ const liveActor = async (db, req, user) => {
   const session = await db.authSession.findUnique({ where: { id: req.authSession }, include: { user: true } });
   user ||= session?.user;
   if (!validSession(session, user) || session.userId !== req.user.id) throw notificationError(401, 'Session expired or revoked');
-  if (user.mustChangePassword || !['ADMIN', 'CASHIER'].includes(user.role) || user.role !== req.user.role) throw notificationError(403, 'Notification permission required');
+  if (!['ADMIN', 'CASHIER'].includes(user.role) || user.role !== req.user.role) throw notificationError(403, 'Notification permission required');
   return user;
 };
 const visible = user => ({ recipientUserId: user.id, ...(user.role === 'ADMIN' ? {} : { type: 'PAYMENT_SUCCESS' }) });

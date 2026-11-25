@@ -12,7 +12,7 @@ const handleError = (res, error) => {
 
 const withCafeLock = (req, callback) => withUserLock(req.user.id, async (tx, admin) => {
   const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
-  if (!validSession(session, admin) || admin.role !== 'ADMIN' || admin.mustChangePassword) throw Object.assign(new Error('Permission denied'), { status: 403 });
+  if (!validSession(session, admin) || admin.role !== 'ADMIN') throw Object.assign(new Error('Permission denied'), { status: 403 });
   await tx.$queryRaw`SELECT id FROM cafe_settings WHERE id = 1 FOR UPDATE`;
   return callback(tx);
 });

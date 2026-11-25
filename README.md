@@ -13,7 +13,7 @@ Open-source cafe POS backend using Express 5, Prisma 7, MariaDB/MySQL, and JWT a
 - Salted scrypt password hashes; passwords and hashes never returned by the API.
 - 15-minute JWT access tokens and database-backed, rotating refresh tokens.
 - Fixed 30-day sessions, refresh replay detection, logout, and session revocation.
-- Mandatory password change for bootstrap, newly registered, and password-reset accounts.
+- Optional password changes; administrator setup reads `ADMIN_PASSWORD` from `.env`.
 - Self-service profile and password updates for both roles.
 - Multer image uploads converted to WebP with Sharp; server-generated `imageUrl` / `logoUrl` values.
 - Dedicated public image listener on a port separate from the API.
@@ -51,6 +51,7 @@ Requirements: Node.js 22 LTS (tested with 22.23.4), npm, Git, and an existing Ma
    HOST=127.0.0.1
    NODE_ENV=development
    JWT_SECRET=replace-with-generated-secret
+   ADMIN_PASSWORD=replace-with-unique-admin-password
    APP_ORIGIN=http://localhost:3000
    IMAGE_HOST=127.0.0.1
    IMAGE_PORT=3001
@@ -68,8 +69,7 @@ Requirements: Node.js 22 LTS (tested with 22.23.4), npm, Git, and an existing Ma
 3. Back up any existing database before applying migrations. Apply the checked-in migrations, generate the client, and start the API:
 
    ```sh
-   npx prisma migrate deploy
-   npx prisma generate
+   npm run setup
    npm start
    ```
 
@@ -77,16 +77,17 @@ Requirements: Node.js 22 LTS (tested with 22.23.4), npm, Git, and an existing Ma
 
 ### First administrator
 
-Migration `202611170003_default_admin` inserts this account only if no `ADMIN` exists:
+`npm run setup` applies migrations, initializes the first administrator, then generates the Prisma client. Set `ADMIN_PASSWORD` in `.env` before running setup. It is used only when creating the first administrator; rerunning setup never resets existing administrators.
 
 | Field | Initial value |
 | --- | --- |
 | Username | `admin` |
-| Password | `ChangeMeBeforeUse!` |
+| Password | `ADMIN_PASSWORD`; unset or empty uses `AdminPassword123` |
 | Role | `ADMIN` |
-| `mustChangePassword` | `true` |
 
-**This bootstrap password is public. Keep a new installation private until you change it through `PUT /api/auth/password`. Do not expose an installation that still uses this password.**
+**The fallback `AdminPassword123` is public. Set a unique `ADMIN_PASSWORD` before setup; keep installation private until the public fallback has been changed through `PUT /api/auth/password`.**
+
+Historical migration `202611170003_default_admin` remains unchanged. Direct `prisma migrate deploy` is migration-only and still inserts its legacy `ChangeMeBeforeUse!` seed; use `npm run setup` on a new installation so that invocation replaces only its newly inserted legacy seed. Existing installations are never silently reset, including ones previously migrated directly; change their passwords through the authenticated endpoint instead. Setup serializes itself with a DB advisory lock, verifies CLI/runtime datasource agreement, and rejects invalid configured passwords before migrations. If setup is interrupted after migrations, inspect the installed account before retrying: existing administrator passwords remain preserved.
 
 Existing administrators are not overwritten. A reserved `admin` username conflict fails instead of promoting that account. The password-change endpoint revokes all sessions, so sign in again afterward.
 
@@ -113,13 +114,13 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 - Send `Content-Type: application/json` for JSON bodies. Image-capable create/update endpoints also accept `multipart/form-data`; let the client generate its multipart boundary. Password/login endpoints remain JSON-only.
 - JSON request limit: 80 KB. Unknown body fields are rejected by validators; updates must contain at least one allowed field.
 - Protected endpoints use `Authorization: Bearer <accessToken>`.
-- Except `/api/auth/me` and `/api/auth/password`, protected endpoints require `mustChangePassword=false`. Forced-change accounts can still log in, refresh, and log out. A blocked request returns `403` with `code: "PASSWORD_CHANGE_REQUIRED"`.
-- User responses expose `id`, `name`, `username`, `role`, `mustChangePassword`, and `imageUrl`. Cashier-management responses also expose `isActive`. Password hashes and refresh tokens are never included in JSON responses.
+- Password changes are optional for all accounts, including the bootstrap administrator and administrator-created users or password resets. Active authenticated users can use permitted endpoints immediately. The `users.must_change_password` column and `mustChangePassword` response field have been removed.
+- User responses expose `id`, `name`, `username`, `role`, and `imageUrl`. Cashier-management responses also expose `isActive`. Password hashes and refresh tokens are never included in JSON responses.
 - Authentication routes set `Cache-Control: no-store`.
 
 ### All available endpoints
 
-`ADMIN*` / `Both*` mean the account must have completed its required password change. Responses are JSON unless PDF is explicitly listed.
+`ADMIN` means administrator only; `Both` permits ADMIN and CASHIER. All protected endpoints require a valid active session. Responses are JSON unless PDF is explicitly listed.
 
 | Method | Path | Access | Input | Success |
 | --- | --- | --- | --- | --- |
@@ -127,38 +128,38 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | POST | `/api/auth/refresh` | Refresh cookie; origin check | No body required | `200` session response + rotated cookie |
 | POST | `/api/auth/logout` | Origin check; cookie optional | No body required | `200` `{message}`; clears cookie |
 | GET | `/api/auth/me` | Both | None | `200` `{user}` |
-| PUT | `/api/auth/profile` | Both* | Partial `name`, `username`; optional file `image` or JSON `imageUrl: null` | `200` `{message, user}` |
+| PUT | `/api/auth/profile` | Both | Partial `name`, `username`; optional file `image` or JSON `imageUrl: null` | `200` `{message, user}` |
 | PUT | `/api/auth/password` | Both | `currentPassword`, `newPassword` | `200` `{message}`; sign in again |
-| POST | `/api/admin/users` | ADMIN* | `name`, `username`, `password`; optional `role`, file `image` or JSON `imageUrl: null` | `201` `{message, user}` |
-| GET | `/api/admin/cashiers` | ADMIN* | Optional query `page`, `limit` | `200` `{cashiers, page, limit, total}` |
-| GET | `/api/admin/cashiers/:id` | ADMIN* | Positive cashier ID | `200` `{cashier}` |
-| PUT | `/api/admin/cashiers/:id` | ADMIN* | Partial `name`, `username`, `isActive`; optional file `image` or JSON `imageUrl: null` | `200` `{message, cashier}` |
-| PUT | `/api/admin/cashiers/:id/password` | ADMIN* | `newPassword` chosen by administrator | `200` `{message}` |
-| GET | `/api/cafe` | Both* | None | `200` cafe settings object directly |
+| POST | `/api/admin/users` | ADMIN | `name`, `username`, `password`; optional `role`, file `image` or JSON `imageUrl: null` | `201` `{message, user}` |
+| GET | `/api/admin/cashiers` | ADMIN | Optional query `page`, `limit` | `200` `{cashiers, page, limit, total}` |
+| GET | `/api/admin/cashiers/:id` | ADMIN | Positive cashier ID | `200` `{cashier}` |
+| PUT | `/api/admin/cashiers/:id` | ADMIN | Partial `name`, `username`, `isActive`; optional file `image` or JSON `imageUrl: null` | `200` `{message, cashier}` |
+| PUT | `/api/admin/cashiers/:id/password` | ADMIN | `newPassword` chosen by administrator | `200` `{message}` |
+| GET | `/api/cafe` | Both | None | `200` cafe settings object directly |
 | GET | `/api/cafe/branding` | Public | None | `200` `{name, logoUrl}` only; `404` when settings absent |
-| POST | `/api/cafe` | ADMIN* | `name`, `address`; optional cafe fields and file `logo` | `201` `{message, cafeSetting}` |
-| PUT | `/api/cafe` | ADMIN* | Partial cafe fields; optional file `logo` | `200` `{message, cafeSetting}` |
-| DELETE | `/api/cafe` | ADMIN* | None | `200` `{message}` |
-| GET | `/api/products` | Both* | Query `page`, `limit`, `search`, `categoryId`, `isAvailable` | `200` `{products, total, page, limit}` |
-| GET | `/api/products/:id` | Both* | Positive product ID | `200` product object directly |
-| POST | `/api/products` | ADMIN* | `name`, `price`; optional product fields/file `image` | `201` `{message, product}` |
-| PUT | `/api/products/:id` | ADMIN* | Partial product fields/file `image` | `200` `{message, product}` |
-| DELETE | `/api/products/:id` | ADMIN* | Positive product ID | `200` `{message, product}`; marks unavailable |
-| GET | `/api/categories` | Both* | Query `page`, `limit`, `search` | `200` `{categories, total, page, limit}` |
-| GET | `/api/categories/:id` | Both* | Positive category ID | `200` category object directly |
-| POST | `/api/categories` | ADMIN* | JSON `name` | `201` `{message, category}` |
-| PUT | `/api/categories/:id` | ADMIN* | JSON `name` | `200` `{message, category}` |
-| DELETE | `/api/categories/:id` | ADMIN* | Positive category ID | `200` `{message}`; `409` if referenced |
-| POST | `/api/orders` | Both*; actor owns new order | JSON `items` | `201` `{message, order}` |
-| GET | `/api/orders` | Both*; owner scope | Query `page`, `limit`, `status`, `orderNumber`; ADMIN-only `cashierId` | `200` `{orders, total, page, limit}` |
-| GET | `/api/orders/:id` | Both*; owner or ADMIN | Positive order ID | `200` order with items directly |
-| PUT | `/api/orders/:id` | Both*; owner or ADMIN | JSON full replacement `items` | `200` `{message, order}`; pending only |
-| POST | `/api/orders/:id/cancel` | Both*; owner or ADMIN | No body or empty JSON object | `200` `{message, order}`; retains history |
-| POST | `/api/orders/:id/payments` | Both*; owner or ADMIN | `requestId`, `method`; CASH requires `cashReceived` | `201` new payment, `200` replay, `202` unresolved; `{message, order, payment}` |
-| GET | `/api/orders/:id/payments` | Both*; owner or ADMIN | Positive order ID; no query | `200` `{order, payments}`; complete attempt history |
-| POST | `/api/orders/:id/payments/:paymentId/reconcile` | Both*; owner or ADMIN | No body or empty JSON object; no query | `200` terminal, `202` pending; `{message, order, payment}` |
-| POST | `/api/orders/:id/receipt` | Both*; owner or ADMIN | No body or empty JSON object; no query | `201` created, `200` existing; `{message, receipt: {downloadUrl, paperSize}}` |
-| GET | `/api/orders/:id/receipt` | Both*; owner or ADMIN | No query | `200` PDF attachment; `404` if not yet generated |
+| POST | `/api/cafe` | ADMIN | `name`, `address`; optional cafe fields and file `logo` | `201` `{message, cafeSetting}` |
+| PUT | `/api/cafe` | ADMIN | Partial cafe fields; optional file `logo` | `200` `{message, cafeSetting}` |
+| DELETE | `/api/cafe` | ADMIN | None | `200` `{message}` |
+| GET | `/api/products` | Both | Query `page`, `limit`, `search`, `categoryId`, `isAvailable` | `200` `{products, total, page, limit}` |
+| GET | `/api/products/:id` | Both | Positive product ID | `200` product object directly |
+| POST | `/api/products` | ADMIN | `name`, `price`; optional product fields/file `image` | `201` `{message, product}` |
+| PUT | `/api/products/:id` | ADMIN | Partial product fields/file `image` | `200` `{message, product}` |
+| DELETE | `/api/products/:id` | ADMIN | Positive product ID | `200` `{message, product}`; marks unavailable |
+| GET | `/api/categories` | Both | Query `page`, `limit`, `search` | `200` `{categories, total, page, limit}` |
+| GET | `/api/categories/:id` | Both | Positive category ID | `200` category object directly |
+| POST | `/api/categories` | ADMIN | JSON `name` | `201` `{message, category}` |
+| PUT | `/api/categories/:id` | ADMIN | JSON `name` | `200` `{message, category}` |
+| DELETE | `/api/categories/:id` | ADMIN | Positive category ID | `200` `{message}`; `409` if referenced |
+| POST | `/api/orders` | Both; actor owns new order | JSON `items` | `201` `{message, order}` |
+| GET | `/api/orders` | Both; owner scope | Query `page`, `limit`, `status`, `orderNumber`; ADMIN-only `cashierId` | `200` `{orders, total, page, limit}` |
+| GET | `/api/orders/:id` | Both; owner or ADMIN | Positive order ID | `200` order with items directly |
+| PUT | `/api/orders/:id` | Both; owner or ADMIN | JSON full replacement `items` | `200` `{message, order}`; pending only |
+| POST | `/api/orders/:id/cancel` | Both; owner or ADMIN | No body or empty JSON object | `200` `{message, order}`; retains history |
+| POST | `/api/orders/:id/payments` | Both; owner or ADMIN | `requestId`, `method`; CASH requires `cashReceived` | `201` new payment, `200` replay, `202` unresolved; `{message, order, payment}` |
+| GET | `/api/orders/:id/payments` | Both; owner or ADMIN | Positive order ID; no query | `200` `{order, payments}`; complete attempt history |
+| POST | `/api/orders/:id/payments/:paymentId/reconcile` | Both; owner or ADMIN | No body or empty JSON object; no query | `200` terminal, `202` pending; `{message, order, payment}` |
+| POST | `/api/orders/:id/receipt` | Both; owner or ADMIN | No body or empty JSON object; no query | `201` created, `200` existing; `{message, receipt: {downloadUrl, paperSize}}` |
+| GET | `/api/orders/:id/receipt` | Both; owner or ADMIN | No query | `200` PDF attachment; `404` if not yet generated |
 | GET / HEAD | `/uploads/receipt/:date/:filename` | Public; image listener only | Canonical generated date/UUID PDF path | `200` PDF inline; HEAD without body |
 | POST | `/api/payments/midtrans/notification` | Public; signature plus provider verification | Midtrans JSON notification | `200` `{message}` after durable processing |
 
@@ -192,7 +193,7 @@ Examples (send normal Bearer access-token header):
 - CSV: UTF-8 BOM, quoted fields, doubled quotes, CRLF rows; transaction rows only, empty report still header. Dangerous formula prefixes in text are apostrophe-protected, including after whitespace. Trusted decimal money retains minus sign. Spreadsheet CSV import can infer numeric types and round long IDs: use explicit text import or XLSX for exact text types.
 - XLSX: `Summary`, `Daily`, `Methods`, `Cashiers`, `Products`, `Transactions`, `Review`; frozen headers and filters. IDs/money/text are string cells, counts numeric; no formulas, hyperlinks or external data. Aggregate sheets always describe all clean candidates regardless of transaction scope. Summary includes filters/scope/time/generatedAt/undated count; Review includes candidate/review counts and reasons. ExcelJS4.4.0 uses scoped uuid11.1.1 override (compatible CommonJS v4 API; actual workbook write/read verified).
 - Bounds: 10,000 dated PAID candidates **before scope**, 100,000 related items and attempts each, 16MiB selected input text, 32MiB generated file. XLSX also caps conservative expanded XML work at 32MiB and each cell at 32,767 UTF-16 code units. Over-limit `422`, never truncation: narrow dates/cashier/method. Read transaction timeout30s; at most2 exports per process through send completion/disconnect, overflow `503`. Generation stays bounded in memory. Cancellation stops cooperative population; already-started bounded XLSX compression finishes into discard sink before slot release. No load-capacity claim.
-- Live account/session/ADMIN/password state checked before reading and again after reading/rendering, before bytes/attachment headers. Middleware keeps existing `401` session, `403` role/password and sanitized `500` auth-DB errors. Report/recheck failures sanitized `503`; recheck invalid/inactive session `401`, demotion/forced-change `403`. All report responses `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. Fixed allowlisted filename includes date/method/cashier/scope. CSV MIME `text/csv; charset=utf-8`; XLSX MIME `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+- Live account/session/ADMIN state checked before reading and again after reading/rendering, before bytes/attachment headers. Middleware keeps existing `401` session, `403` role and sanitized `500` auth-DB errors. Report/recheck failures sanitized `503`; recheck invalid/inactive session `401`, demotion `403`. All report responses `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. Fixed allowlisted filename includes date/method/cashier/scope. CSV MIME `text/csv; charset=utf-8`; XLSX MIME `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
 - Local checks: `node --test scripts/sales-report.check.js`, `node --import tsx --test scripts/sales-report.integration.js`, plus existing `npm test` / `npm run test:integration`. Verification scripts remain ignored under current repository policy: clean clones do not contain these tests; this does not establish CI coverage. Desktop Excel visual inspection and production deployment remain separate checks.
 
 ### PDF receipts and customer QR download
@@ -363,7 +364,6 @@ Example session response structure (login and refresh):
     "name": "Administrator",
     "username": "admin",
     "role": "ADMIN",
-    "mustChangePassword": true,
     "imageUrl": null
   }
 }
@@ -403,7 +403,7 @@ Treat access tokens and cookie jars as credentials; never commit them. Refresh r
 | --- | --- |
 | `name` | Required at registration; trimmed, nonempty, well-formed Unicode, at most 100 code points |
 | `username` | Required at registration/login; 1–100 ASCII letters, digits, `_`, `.`, or `-`; normalized to lowercase; unique |
-| `password`, `currentPassword`, `newPassword` | Well-formed Unicode, 12–128 UTF-8 bytes; exact bytes preserved, not trimmed |
+| `password`, `currentPassword`, `newPassword` | Well-formed Unicode, 8–128 UTF-8 bytes; exact bytes preserved, not trimmed |
 | `role` | Registration only: `ADMIN` or `CASHIER`; omitted defaults to `CASHIER` |
 | `imageUrl` | Server-generated response URL; non-null client values rejected; JSON `null` clears it. Upload file field `image` instead |
 | `isActive` | Cashier editing only; strict JSON boolean |
@@ -442,7 +442,7 @@ Own-password example (`PUT /api/auth/password`):
 }
 ```
 
-The new password must differ from the current password. A successful change clears `mustChangePassword`, revokes **all** of the user's sessions, and clears the refresh cookie. Sign in again with the new password.
+The new password must differ from the current password. A successful change revokes **all** of the user's sessions, and clears the refresh cookie. Sign in again with the new password.
 
 ### Cashier management
 
@@ -468,7 +468,7 @@ The new password must differ from the current password. A successful change clea
   }
   ```
 
-  The administrator supplies the password. The API hashes it, revokes all cashier sessions, and sets `mustChangePassword=true`. It never generates or returns a plaintext password. Deliver the chosen password securely; the cashier must sign in and change it before continuing. A reset does not reactivate an inactive cashier.
+  The administrator supplies the password. The API hashes it and revokes all cashier sessions. It never generates or returns a plaintext password. Deliver the chosen password securely; the cashier can sign in and work immediately, with no mandatory password change. A reset does not reactivate an inactive cashier.
 
 ### Products and categories
 
@@ -547,7 +547,7 @@ Settings responses contain the fields above plus `id`, `createdAt`, and `updated
 
 ### Errors
 
-Handled errors generally use `{ "message": "..." }`; forced-password-change errors additionally include `code`. Validation messages currently mix English and Indonesian. Unknown routes use Express's default `404` response, not a custom JSON envelope.
+Handled errors generally use `{ "message": "..." }`. Validation messages currently mix English and Indonesian. Unknown routes use Express's default `404` response, not a custom JSON envelope.
 
 | Status | Meaning |
 | --- | --- |
@@ -584,7 +584,7 @@ AUTH_TEST_DATABASE_ACK=<test-host>:<test-port>/pos_auth_test \
 node --import tsx --test scripts/catalog.integration.js
 ```
 
-Integration checks require explicit test-target acknowledgement, create uniquely named fixtures in `pos_auth_test`, and clean only their own rows/files. Credentials come from the environment or ignored `.env`. The acknowledgement must match `DATABASE_HOST:DATABASE_PORT/DATABASE_NAME` (port defaults to 3306). Never point fixture checks at production or reset existing databases to satisfy a test. Catalog verification includes role/forced-change guards, validation, filters/pagination, category assignment/deletion races, unavailable retention, images/replacements and rollback cleanup.
+Integration checks require explicit test-target acknowledgement, create uniquely named fixtures in `pos_auth_test`, and clean only their own rows/files. Credentials come from the environment or ignored `.env`. The acknowledgement must match `DATABASE_HOST:DATABASE_PORT/DATABASE_NAME` (port defaults to 3306). Never point fixture checks at production or reset existing databases to satisfy a test. Catalog verification includes role/session guards, validation, filters/pagination, category assignment/deletion races, unavailable retention, images/replacements and rollback cleanup.
 
 Local payment checks, when present:
 
@@ -614,7 +614,7 @@ List newest ID first; rows and total share a request snapshot, not cross-request
 
 `PAYMENT_SUCCESS` data: `{orderId,paymentId,orderNumber,amount,method,paidAt}`. First successful CASH or verified QRIS settlement notifies order-owning cashier, even when initiating payer is admin or owner is inactive. No pending/failed/expired/held-conflict event, duplicate settlement, or historical payment backfill. Notification and **local** payment/order/evidence settlement commit together. If notification storage fails, local settlement rolls back and request is retryable. QRIS provider funds may already be charged and cannot be rolled back by this transaction; provider redelivery or protected reconciliation must complete local settlement. Local DB concurrency retries never redispatch provider charge. Receipt generation remains independent after commit.
 
-`DAILY_SALES_REPORT` data includes `{businessDate,reportId,status,generatedAt,summary,review,filters}`. Backend checks every60seconds, normally generating shortly after `00:00 Asia/Jakarta` for previous calendar day. First activation durably saves yesterday in `notification_schedule_state` before report computation, so a failed first generation survives midnight and restart. Later downtime catches missed days oldest-first, max7days/tick. Multiple instances elect one report/fanout using DB uniqueness. Zero-sales days still notify; zero eligible admins still save progress. Recipients are active ADMIN accounts without forced password change at generation; no backfill for admins added/promoted later. Report snapshot reuses exact bounded sales engine and never changes after generation; late settlements or later holds may make live reports differ. `generatedAt` means snapshot capture, not insertion/delivery time.
+`DAILY_SALES_REPORT` data includes `{businessDate,reportId,status,generatedAt,summary,review,filters}`. Backend checks every60seconds, normally generating shortly after `00:00 Asia/Jakarta` for previous calendar day. First activation durably saves yesterday in `notification_schedule_state` before report computation, so a failed first generation survives midnight and restart. Later downtime catches missed days oldest-first, max7days/tick. Multiple instances elect one report/fanout using DB uniqueness. Zero-sales days still notify; zero eligible admins still save progress. Recipients are active ADMIN accounts at generation; no backfill for admins added/promoted later. Report snapshot reuses exact bounded sales engine and never changes after generation; late settlements or later holds may make live reports differ. `generatedAt` means snapshot capture, not insertion/delivery time.
 
 Deterministic sales-limit422 saves `DAILY_SALES_REPORT_UNAVAILABLE` with `status: UNAVAILABLE` and `reason: REPORT_LIMIT_EXCEEDED`, not invented zero totals. Other failures retry next tick without partial fanout. Caps:1000eligible admins/day,16KiB per notification data,64KiB shared report data; recipient overflow logs sanitized failure and retries. Up to60seconds normal polling delay is not a deadline during downtime/overload. Records retained indefinitely; operator owns capacity/retention policy. No create/delete endpoint, public scheduler trigger, email, push, WebSocket or SSE.
 

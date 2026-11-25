@@ -8,7 +8,7 @@ import { validateOrder, parseOrderQuery, calculateOrder, validateOrderSnapshot, 
 const include={items:{orderBy:{id:'asc'}}};
 const withActor = (req,callback) => withUserLock(req.user.id,async(tx,user)=>{
   const session=await tx.authSession.findUnique({where:{id:req.authSession}});
-  if (!validSession(session,user) || !['ADMIN','CASHIER'].includes(user.role) || user.mustChangePassword) throw orderError('Order permission required',403);
+  if (!validSession(session,user) || !['ADMIN','CASHIER'].includes(user.role)) throw orderError('Order permission required',403);
   return callback(tx,user);
 });
 const owned = (order,user) => {

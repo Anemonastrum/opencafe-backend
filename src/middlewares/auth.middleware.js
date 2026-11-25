@@ -24,10 +24,6 @@ export const requireRoles = (...roles) => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) return res.status(403).json({ message: 'Permission denied' });
   return next();
 };
-export const requirePasswordChangeComplete = (req, res, next) => {
-  if (req.user.mustChangePassword) return res.status(403).json({ message: 'Change your password before continuing', code: 'PASSWORD_CHANGE_REQUIRED' });
-  return next();
-};
 export const sameOrigin = (req, res, next) => {
   const origin = req.headers.origin;
   if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && (!authConfig.origin || origin !== authConfig.origin))) return res.status(403).json({ message: 'Cross-origin authentication request denied' });

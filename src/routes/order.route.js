@@ -2,10 +2,10 @@ import express from 'express';
 import { createOrder, listOrders, getOrder, updateOrder, cancelOrder } from '../controllers/order.controller.js';
 import { createPayment, listPayments, reconcilePayment } from '../controllers/payment.controller.js';
 import { generateReceipt, downloadReceipt } from '../controllers/receipt.controller.js';
-import { authenticate, requirePasswordChangeComplete, requireRoles, requireJson } from '../middlewares/auth.middleware.js';
+import { authenticate, requireRoles, requireJson } from '../middlewares/auth.middleware.js';
 
 const router=express.Router();
-router.use(authenticate,requirePasswordChangeComplete,requireRoles('ADMIN','CASHIER'));
+router.use(authenticate,requireRoles('ADMIN','CASHIER'));
 router.use((req,res,next)=>{
   try {
     const query=req.originalUrl.split('?')[1]||'';

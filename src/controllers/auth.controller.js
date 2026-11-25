@@ -64,7 +64,7 @@ export const updateProfile = async (req, res) => {
   try {
     const user = await withUserLock(req.user.id, async (tx, current) => {
       const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
-      if (!validSession(session, current) || current.mustChangePassword) return null;
+      if (!validSession(session, current)) return null;
       previous = current.imageUrl;
       if (req.image) { saved = await saveImage(req.image, `user/${current.id}`); data.imageUrl = saved.url; }
       return tx.user.update({ where: { id: current.id }, data });
@@ -90,7 +90,7 @@ export const changePassword = async (req, res) => {
     const changed = await withUserLock(user.id, async (tx, current) => {
       const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
       if (!validSession(session, current) || current.passwordHash !== user.passwordHash) return false;
-      await tx.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: false } });
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
       await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
       return true;
     });

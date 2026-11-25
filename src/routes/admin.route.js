@@ -1,6 +1,6 @@
 import express from 'express';
 import { registerUser, listCashiers, getCashier, updateCashier, resetCashierPassword } from '../controllers/admin.controller.js';
-import { authenticate, requireRoles, requirePasswordChangeComplete, requireJson, createLoginLimiter } from '../middlewares/auth.middleware.js';
+import { authenticate, requireRoles, requireJson, createLoginLimiter } from '../middlewares/auth.middleware.js';
 
 import { uploadImage } from '../middlewares/upload.middleware.js';
 
@@ -8,7 +8,7 @@ import { getSalesReport, listSalesTransactions, exportSalesReport } from '../con
 
 const router = express.Router();
 router.use('/reports/sales', (req, res, next) => { res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); next(); });
-router.use(authenticate, requirePasswordChangeComplete, requireRoles('ADMIN'));
+router.use(authenticate, requireRoles('ADMIN'));
 router.get('/reports/sales', getSalesReport);
 router.get('/reports/sales/transactions', listSalesTransactions);
 router.get('/reports/sales/export', exportSalesReport);

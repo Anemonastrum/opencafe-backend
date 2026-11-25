@@ -31,7 +31,7 @@ export const generateDailyNotificationReport = async (db, businessDate, { signal
     signal?.throwIfAborted();
     const saved = await tx.dailyNotificationReport.findUnique({ where });
     if (saved) return saved;
-    const admins = await tx.user.findMany({ where: { role: 'ADMIN', isActive: true, mustChangePassword: false }, select: { id: true }, take: 1001, orderBy: { id: 'asc' } });
+    const admins = await tx.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { id: true }, take: 1001, orderBy: { id: 'asc' } });
     if (admins.length > 1000) throw notificationError(503);
     const report = await tx.dailyNotificationReport.create({ data: { ...where, generatedAt, status, data } });
     if (admins.length) await tx.notification.createMany({ data: admins.map(user => ({ recipientUserId: user.id, type: status === 'READY' ? 'DAILY_SALES_REPORT' : 'DAILY_SALES_REPORT_UNAVAILABLE', eventKey: `daily:${businessDate}`, reportId: report.id, data: boundedNotificationJson({ businessDate, reportId: String(report.id) }) })) });

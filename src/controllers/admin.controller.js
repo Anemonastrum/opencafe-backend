@@ -18,7 +18,7 @@ const withCashierLock = (req, id, callback) => prisma.$transaction(async tx => {
   }
   const admin = await tx.user.findUnique({ where: { id: req.user.id } });
   const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
-  if (!validSession(session, admin) || admin.role !== 'ADMIN' || admin.mustChangePassword) throw Object.assign(new Error('Administrator permission required'), { status: 403 });
+  if (!validSession(session, admin) || admin.role !== 'ADMIN') throw Object.assign(new Error('Administrator permission required'), { status: 403 });
   const cashier = await tx.user.findUnique({ where: { id } });
   if (!cashier || cashier.role !== 'CASHIER') throw Object.assign(new Error('Cashier not found'), { status: 404 });
   return callback(tx, cashier);
@@ -74,10 +74,10 @@ export const resetCashierPassword = async (req, res) => {
   try {
     const passwordHash = await hashPassword(data.newPassword);
     await withCashierLock(req, id, async tx => {
-      await tx.user.update({ where: { id }, data: { passwordHash, mustChangePassword: true } });
+      await tx.user.update({ where: { id }, data: { passwordHash } });
       await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     });
-    return res.json({ message: 'Cashier password reset successfully; password change required at next login' });
+    return res.json({ message: 'Cashier password reset successfully' });
   } catch (error) { return handleError(res, error); }
 };
 
@@ -91,8 +91,8 @@ export const registerUser = async (req, res) => {
     const passwordHash = await hashPassword(data.password);
     const user = await withUserLock(req.user.id, async (tx, admin) => {
       const session = await tx.authSession.findUnique({ where: { id: req.authSession } });
-      if (!validSession(session, admin) || admin.role !== 'ADMIN' || admin.mustChangePassword) return null;
-      const created = await tx.user.create({ data: { name: data.name, username: data.username, role: data.role, imageUrl: data.imageUrl, passwordHash, mustChangePassword: true } });
+      if (!validSession(session, admin) || admin.role !== 'ADMIN') return null;
+      const created = await tx.user.create({ data: { name: data.name, username: data.username, role: data.role, imageUrl: data.imageUrl, passwordHash } });
       if (!req.image) return created;
       saved = await saveImage(req.image, `user/${created.id}`);
       return tx.user.update({ where: { id: created.id }, data: { imageUrl: saved.url } });

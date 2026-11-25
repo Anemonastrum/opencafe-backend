@@ -26,7 +26,7 @@ const keyFor = async (password, salt) => {
   finally { hashJobs--; }
 };
 export const hashPassword = async password => {
-  if (!passwordValid(password)) throw Object.assign(new Error('Password must contain 12–128 UTF-8 bytes'), { status: 400 });
+  if (!passwordValid(password)) throw Object.assign(new Error('Password must contain 8–128 UTF-8 bytes'), { status: 400 });
   const salt = randomBytes(16).toString('hex');
   const key = await keyFor(password, salt);
   return `scrypt$16384$8$1$${salt}$${key.toString('hex')}`;
@@ -40,7 +40,7 @@ export const verifyPassword = async (password, hash) => {
 const objectWith = (body, keys) => body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).every(key => keys.includes(key));
 const usernameValid = value => typeof value === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(value);
 export const validateLogin = body => {
-  if (!objectWith(body, ['username', 'password']) || !usernameValid(body.username) || !passwordValid(body.password)) return { error: 'Valid username and password (12–128 UTF-8 bytes) required' };
+  if (!objectWith(body, ['username', 'password']) || !usernameValid(body.username) || !passwordValid(body.password)) return { error: 'Valid username and password (8–128 UTF-8 bytes) required' };
   return { data: { username: body.username.toLowerCase(), password: body.password } };
 };
 export const validateRegistration = body => {
@@ -50,7 +50,7 @@ export const validateRegistration = body => {
   return { data: { name: body.name.trim(), username: body.username.toLowerCase(), password: body.password, role: body.role || 'CASHIER', ...image.data } };
 };
 export const validatePasswordChange = body => {
-  if (!objectWith(body, ['currentPassword', 'newPassword']) || !passwordValid(body.currentPassword) || !passwordValid(body.newPassword) || body.currentPassword === body.newPassword) return { error: 'Current password and different new password (12–128 UTF-8 bytes) required' };
+  if (!objectWith(body, ['currentPassword', 'newPassword']) || !passwordValid(body.currentPassword) || !passwordValid(body.newPassword) || body.currentPassword === body.newPassword) return { error: 'Current password and different new password (8–128 UTF-8 bytes) required' };
   return { data: { currentPassword: body.currentPassword, newPassword: body.newPassword } };
 };
 export const createAccessToken = (userId, sessionId) => jwt.sign({ sid: sessionId }, secret, { algorithm: 'HS256', subject: String(userId), expiresIn: authConfig.accessSeconds, issuer: 'opencafe', audience: 'opencafe-api' });

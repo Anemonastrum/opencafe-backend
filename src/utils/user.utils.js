@@ -1,7 +1,7 @@
-export const safeUser = user => ({ id: user.id, name: user.name, username: user.username, role: user.role, mustChangePassword: user.mustChangePassword, imageUrl: user.imageUrl ?? null });
+export const safeUser = user => ({ id: user.id, name: user.name, username: user.username, role: user.role, imageUrl: user.imageUrl ?? null });
 export const safeCashier = user => ({ ...safeUser(user), isActive: user.isActive });
 
-export const passwordValid = value => typeof value === 'string' && value.isWellFormed() && Buffer.byteLength(value) >= 12 && Buffer.byteLength(value) <= 128;
+export const passwordValid = value => typeof value === 'string' && value.isWellFormed() && Buffer.byteLength(value) >= 8 && Buffer.byteLength(value) <= 128;
 
 export const validateProfile = (body, admin = false) => {
   const fields = ['name', 'username', 'imageUrl', ...(admin ? ['isActive'] : [])];
@@ -28,7 +28,7 @@ export const validateProfile = (body, admin = false) => {
   return { data };
 };
 export const validateResetPassword = body => {
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !passwordValid(body.newPassword)) return { error: 'newPassword must contain 12–128 UTF-8 bytes' };
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !passwordValid(body.newPassword)) return { error: 'newPassword must contain 8–128 UTF-8 bytes' };
   return { data: { newPassword: body.newPassword } };
 };
 export const parseUserId = value => typeof value === 'string' && /^[1-9]\d{0,9}$/.test(value) && Number(value) <= 2147483647 ? Number(value) : null;

@@ -14,7 +14,7 @@ import { parseSalesQuery, loadSalesReport, salesError } from '../utils/sales-rep
 const requireLiveReportAdmin = async req => {
   const session = await prisma.authSession.findUnique({ where: { id: req.authSession }, include: { user: true } });
   if (!validSession(session, session?.user) || session.userId !== req.user.id) throw salesError(401, 'Session expired or revoked');
-  if (session.user.role !== 'ADMIN' || session.user.mustChangePassword) throw salesError(403, 'Administrator permission required');
+  if (session.user.role !== 'ADMIN') throw salesError(403, 'Administrator permission required');
 };
 const reportError = (res, error) => {
   const status = [400, 401, 403, 422, 503].includes(error.status) ? error.status : 503;

@@ -7,13 +7,13 @@ import {
   deleteCafeSetting,
 } from '../controllers/cafe.controller.js';
 
-import { authenticate, requirePasswordChangeComplete, requireRoles } from '../middlewares/auth.middleware.js';
+import { authenticate, requireRoles } from '../middlewares/auth.middleware.js';
 
 import { uploadImage } from '../middlewares/upload.middleware.js';
 
 const router = express.Router();
 router.get('/branding', getCafeBranding);
-router.use(authenticate, requirePasswordChangeComplete);
+router.use(authenticate);
 
 router.get('/', getCafeSetting);
 router.post('/', requireRoles('ADMIN'), uploadImage('logo', createCafeSetting));

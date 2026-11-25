@@ -39,7 +39,7 @@ export const parseCatalogQuery = (query, products=false) => {
 export const catalogError = (message,status) => Object.assign(new Error(message),{status});
 export const withCatalogAdmin = (req,callback) => withUserLock(req.user.id,async (tx,user) => {
   const session=await tx.authSession.findUnique({where:{id:req.authSession}});
-  if (!validSession(session,user) || user.role!=='ADMIN' || user.mustChangePassword) throw catalogError('Administrator permission required',403);
+  if (!validSession(session,user) || user.role!=='ADMIN') throw catalogError('Administrator permission required',403);
   return callback(tx);
 });
 export const handleCatalogError = (res,error) => {
