@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { midtransConfig, chargeQris, getQrisStatus, providerObservation, qrisDetails, validNotification, verifyMidtransNotification } from '../utils/midtrans.utils.js';
 import { withUserLock, validSession } from '../utils/session.utils.js';
 import { parseCatalogId } from '../utils/catalog.utils.js';
-import { validateOrderSnapshot, serializeOrder } from '../utils/order.utils.js';
+import { validateOrderSnapshot, serializeOrder, checkoutVersion } from '../utils/order.utils.js';
 import { paymentError, handlePaymentError, validatePayment, paymentAmounts, validateQrisAmount, moneyCents, fixedMoney, samePaymentRequest, serializePayment, legacyPaymentHold } from '../utils/payment.utils.js';
 
 const include = { items: { orderBy: { id: 'asc' } } };
@@ -40,6 +40,7 @@ export const createPayment = async (req, res) => {
       }
       if (order.paymentHoldReason || order.status !== 'PENDING' || await tx.payment.count({ where: { orderId: id, status: { in: ['PENDING', 'PAID'] } } })) throw paymentError('Order cannot accept payment in its current state', 409);
       validateOrderSnapshot(order);
+      if (data.checkoutVersion !== checkoutVersion(order)) throw paymentError('Order changed. Review details before paying.', 409);
       const amounts = paymentAmounts(order.totalAmount);
       if (data.method === 'QRIS') { validateQrisAmount(amounts); midtransConfig(); }
       const received = data.method === 'CASH' ? moneyCents(data.cashReceived) : 0n, payable = moneyCents(amounts.amount);

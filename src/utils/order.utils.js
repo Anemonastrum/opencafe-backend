@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { parseCatalogId } from './catalog.utils.js';
 
 export const orderError = (message,status) => Object.assign(new Error(message),{status});
@@ -69,13 +70,22 @@ const displayMoney = value => {
   return text.startsWith('-') ? `-${fixed(cents(text.slice(1)))}` : fixed(cents(text));
 };
 const money=['subtotalAmount','taxRate','taxAmount','totalAmount'];
+const checkoutFields=['id','orderNumber','status','paymentHoldReason','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','receiptPaperSize','taxName','taxInclusive'];
+export const checkoutVersion = order => {
+  const snapshot=checkoutFields.map(key=>order[key]??null);
+  snapshot.push(...money.map(key=>displayMoney(order[key])));
+  snapshot.push(...['createdAt','updatedAt','completedAt'].map(key=>order[key]==null?null:new Date(order[key]).toISOString()));
+  snapshot.push([...order.items].sort((a,b)=>a.id-b.id).map(item=>[item.id,item.productId,item.productName,displayMoney(item.unitPrice),item.quantity,displayMoney(item.subtotal)]));
+  return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+};
 export const serializeOrder = order => {
   const result={};
-  for (const key of ['id','orderNumber','status','paymentHoldReason','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','taxName','taxInclusive','createdAt','updatedAt','completedAt',...money]) {
+  for (const key of ['id','orderNumber','status','paymentHoldReason','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','receiptPaperSize','taxName','taxInclusive','createdAt','updatedAt','completedAt',...money]) {
     if (order[key]!==undefined) result[key]=money.includes(key)?displayMoney(order[key]):order[key];
   }
   if (order.items) result.items=order.items.map(item=>({id:item.id,productId:item.productId,productName:item.productName,unitPrice:displayMoney(item.unitPrice),quantity:item.quantity,subtotal:displayMoney(item.subtotal)}));
   if (order._count) result._count={items:order._count.items};
+  result.checkoutVersion=order.items?checkoutVersion(order):null;
   return result;
 };
 export const handleOrderError = (res,error) => {

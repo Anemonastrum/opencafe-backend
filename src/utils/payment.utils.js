@@ -22,10 +22,11 @@ export const validateQrisAmount = amounts => {
 };
 export const validatePayment = body => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'Invalid payment fields' };
-  const fields = body.method === 'CASH' ? ['requestId', 'method', 'cashReceived'] : ['requestId', 'method'];
+  const fields = body.method === 'CASH' ? ['requestId', 'method', 'cashReceived', 'checkoutVersion'] : ['requestId', 'method', 'checkoutVersion'];
   if (!['CASH', 'QRIS'].includes(body.method) || Object.keys(body).length !== fields.length || Object.keys(body).some(key => !fields.includes(key))) return { error: 'Invalid payment fields' };
   if (typeof body.requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(body.requestId)) return { error: 'requestId must be a canonical lowercase UUID' };
-  const data = { requestId: body.requestId, method: body.method };
+  if (typeof body.checkoutVersion !== 'string' || body.checkoutVersion.length !== 64 || !/^[0-9a-f]{64}$/.test(body.checkoutVersion)) return { error: 'checkoutVersion must be a lowercase SHA-256 hex digest' };
+  const data = { requestId: body.requestId, method: body.method, checkoutVersion: body.checkoutVersion };
   if (body.method === 'CASH') {
     if (!['number', 'string'].includes(typeof body.cashReceived)) return { error: 'Invalid cashReceived' };
     try { data.cashReceived = fixedMoney(moneyCents(body.cashReceived)); }
