@@ -4,14 +4,22 @@ import { parseCatalogId } from './catalog.utils.js';
 export const orderError = (message,status) => Object.assign(new Error(message),{status});
 const integer = (value,max) => Number.isInteger(value) && value>0 && value<=max;
 const object = value => value && typeof value==='object' && !Array.isArray(value);
-export const validateOrder = body => {
-  if (!object(body) || Object.keys(body).length!==1 || !Array.isArray(body.items) || !body.items.length || body.items.length>100) return {error:'Supply 1–100 distinct order items'};
+export const validateOrder = (body, {creation=false}={}) => {
+  const fields=creation?['items','customerName']:['items'];
+  if (!object(body) || Object.keys(body).some(key=>!fields.includes(key)) || !Array.isArray(body.items) || !body.items.length || body.items.length>100) return {error:'Supply 1–100 distinct order items'};
+  let customerName=null;
+  if (creation && body.customerName!=null) {
+    const name=body.customerName;
+    if (typeof name!=='string' || !name.isWellFormed() || /[\p{Cc}\u2028\u2029]/u.test(name) || [...name.trim()].length>100) return {error:'customerName must be a single-line name of at most 100 characters'};
+    customerName=name.trim()||null;
+  }
   const ids=new Set();
   for (const item of body.items) {
     if (!object(item) || Object.keys(item).length!==2 || !integer(item.productId,2147483647) || !integer(item.quantity,999) || ids.has(item.productId)) return {error:'Each item requires a distinct productId and quantity 1–999'};
     ids.add(item.productId);
   }
-  return {data:body.items.map(({productId,quantity})=>({productId,quantity})).sort((a,b)=>a.productId-b.productId)};
+  const items=body.items.map(({productId,quantity})=>({productId,quantity})).sort((a,b)=>a.productId-b.productId);
+  return {data:creation?{items,customerName}:items};
 };
 export const parseOrderQuery = (query,user) => {
   if (Object.keys(query).some(key=>!['page','limit','status','cashierId','orderNumber'].includes(key))) return {error:'Invalid order query fields'};
@@ -70,7 +78,7 @@ const displayMoney = value => {
   return text.startsWith('-') ? `-${fixed(cents(text.slice(1)))}` : fixed(cents(text));
 };
 const money=['subtotalAmount','taxRate','taxAmount','totalAmount'];
-const checkoutFields=['id','orderNumber','status','paymentHoldReason','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','receiptPaperSize','taxName','taxInclusive'];
+const checkoutFields=['id','orderNumber','customerName','status','paymentHoldReason','cashierId','receiptCafeName','receiptSocialMedia','receiptCafeAddress','receiptLogoUrl','receiptCashierName','receiptPaperSize','taxName','taxInclusive'];
 export const checkoutVersion = order => {
   const snapshot=checkoutFields.map(key=>order[key]??null);
   snapshot.push(...money.map(key=>displayMoney(order[key])));
@@ -79,7 +87,7 @@ export const checkoutVersion = order => {
   return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
 };
 export const serializeOrder = order => {
-  const result={};
+  const result={customerName:order.customerName??null,receiptSocialMedia:order.receiptSocialMedia??null};
   for (const key of ['id','orderNumber','status','paymentHoldReason','cashierId','receiptCafeName','receiptCafeAddress','receiptLogoUrl','receiptCashierName','receiptPaperSize','taxName','taxInclusive','createdAt','updatedAt','completedAt',...money]) {
     if (order[key]!==undefined) result[key]=money.includes(key)?displayMoney(order[key]):order[key];
   }

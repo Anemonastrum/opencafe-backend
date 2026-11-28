@@ -99,6 +99,7 @@ model CafeSetting {
   name    String  @db.VarChar(150)
   logoUrl String? @map("logo_url") @db.VarChar(500)
   address String  @db.Text
+  socialMedia String? @map("social_media") @db.VarChar(200)
   receiptPaperSize String @default("58mm") @map("receipt_paper_size") @db.VarChar(4)
 
   // Tax settings
@@ -160,6 +161,7 @@ model Product {
 model Order {
   id          Int         @id @default(autoincrement())
   orderNumber String      @unique @map("order_number") @db.VarChar(50)
+  customerName String?     @map("customer_name") @db.VarChar(100)
   status      OrderStatus @default(PENDING)
   paymentHoldReason String? @map("payment_hold_reason") @db.VarChar(100)
 
@@ -179,6 +181,7 @@ model Order {
 
   // Receipt snapshots
   receiptCafeName    String? @map("receipt_cafe_name") @db.VarChar(150)
+  receiptSocialMedia String? @map("receipt_social_media") @db.VarChar(200)
   receiptCafeAddress String? @map("receipt_cafe_address") @db.Text
   receiptLogoUrl     String? @map("receipt_logo_url") @db.VarChar(500)
   receiptCashierName String? @map("receipt_cashier_name") @db.VarChar(100)

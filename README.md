@@ -150,7 +150,7 @@ Existing settings are not overwritten. Edit initial settings through `PUT /api/c
 | POST | `/api/categories` | ADMIN | JSON `name` | `201` `{message, category}` |
 | PUT | `/api/categories/:id` | ADMIN | JSON `name` | `200` `{message, category}` |
 | DELETE | `/api/categories/:id` | ADMIN | Positive category ID | `200` `{message}`; `409` if referenced |
-| POST | `/api/orders` | Both; actor owns new order | JSON `items` | `201` `{message, order}` |
+| POST | `/api/orders` | Both; actor owns new order | JSON `items`; optional `customerName` | `201` `{message, order}` |
 | GET | `/api/orders` | Both; owner scope | Query `page`, `limit`, `status`, `orderNumber`; ADMIN-only `cashierId` | `200` `{orders, total, page, limit}` |
 | GET | `/api/orders/:id` | Both; owner or ADMIN | Positive order ID | `200` order with items directly |
 | PUT | `/api/orders/:id` | Both; owner or ADMIN | JSON full replacement `items` | `200` `{message, order}`; pending only |
@@ -200,27 +200,31 @@ Examples (send normal Bearer access-token header):
 
 - Set `receiptPaperSize` through `PUT /api/cafe` to exactly `58mm` or `80mm`; default is `58mm`. Forward migration `202611190002_receipts` adds the setting without replacing existing cafe data. New orders capture width; later preference changes do not resize reprints. Legacy orders capture preference when settled or first issued.
 - CASH and verified QRIS settlement generate PDF after financial commit. Generation is best effort: a failed renderer, storage outage or process crash does not undo payment. Call authenticated `POST /api/orders/:id/receipt` to retry. It accepts no body or `{}` and no query; returns `201` created or `200` existing with `{message, receipt: {downloadUrl, paperSize}}`. The separate authenticated GET returns an existing PDF attachment without generating it.
-- Files live in `uploads/receipt/YYYY-MM-DD/<random-uuid>.pdf`, using payment paid date in `Asia/Jakarta`. Template is `src/assets/receipt.template.js`; bundled Noto Sans font/license support Indonesian/Latin text. Unsupported glyphs display `?`. No logo or remote resource fetching occurs. Long receipts paginate at the chosen physical width.
-- Content uses captured cafe/cashier/item/tax/payment facts, including original total, signed rounding, payable, CASH tender and change. Missing historical text reads `Unavailable`; invalid/missing financial snapshots return `409`, never invented history.
+- Files live in `uploads/receipt/YYYY-MM-DD/<random-uuid>.pdf`, using payment paid date in `Asia/Jakarta`. Template is `src/assets/receipt.template.js`; bundled Noto Sans font/license support Indonesian/Latin text. Unsupported glyphs display `?`. Captured local cafe logos may be read from installation-owned uploads; no remote resource fetching occurs. Long receipts paginate at the chosen physical width.
+- Content uses captured cafe/cashier/customer/social-media/item/tax/payment facts. When present, customer name prints directly below cashier and wraps within the right column; absent names omit that row. Optional captured `receiptSocialMedia` prints centered below the receipt PDF QR, wrapping within 58mm/80mm margins; no value omits text and its extra space. Set it with cafe `socialMedia` before creating new orders. Changing settings does not modify existing order footers or stored PDFs, including missing-file regeneration; old orders remain without social text. The QR still links to the receipt PDF, not the social account. Subtotal, tax, final `Total`, CASH tender and change remain displayed; original total and rounding stay in accounting snapshots, not receipt rows. Missing historical required text reads `Unavailable`; invalid/missing financial snapshots return `409`, never invented history. Stored PDFs remain unchanged by template updates.
 - Each PDF contains a vector QR pointing directly to its own persisted public `downloadUrl` through `IMAGE_BASE_URL`. Use a publicly reachable HTTPS origin in production, not localhost. The image listener serves canonical receipt PDF GET/HEAD alongside WebP; API port does not serve uploads. QR encoding runs locally. Existing URL/file is reused unchanged; missing files regenerate using original URL and width. If origin changes, retain old hostname or redirects so printed QR codes keep working.
-- **Anyone holding the QR or URL can read receipt purchases, amounts and cashier name without login. Random UUID is bearer access, not authentication. Published files remain readable after session revocation or financial holds until removed. Avoid logging receipt URLs and retain only as long as installation policy permits.** Protected endpoints still enforce current session/role, owner-or-ADMIN scope and reconciliation guards; receipt URLs are not included in general order/payment listings.
+- **Anyone holding the QR or URL can read receipt purchases, amounts, cashier name and supplied customer name without login. Random UUID is bearer access, not authentication. Published files remain readable after session revocation or financial holds until removed. Avoid logging receipt URLs and retain only as long as installation policy permits.** Protected endpoints still enforce current session/role, owner-or-ADMIN scope and reconciliation guards; receipt URLs are not included in general order/payment listings.
 - Protected requests return `400` malformed input, existing `401`/`403` authentication failures, `404` absent/foreign order or missing file, `409` incomplete/unpaid/held/ambiguous/unsupported snapshots, and sanitized `503` generation/storage failure. Public missing/invalid files return `404`. Both downloads use `private, no-store` and `nosniff`. No directory listing or arbitrary uploads access.
 - Writes publish completed PDFs without overwriting prior output. Nonregular/symlink targets and PDFs missing expected header/end markers are refused; operator must quarantine/remove rejected files before retry. Stored-file checks are not a full PDF parser or checksum: internal corruption retaining those markers can go undetected. Application-owned directories/files default to `0700`/`0600`; an external file-serving proxy needs deployment-specific read permissions, not globally writable uploads. Back up PDFs and DB together. No retention worker, URL rotation endpoint or multi-host storage synchronization is provided.
 
 ### Pending orders
 
-Create an order with `POST /api/orders` or replace its complete item selection with `PUT /api/orders/:id`:
+Create an order with `POST /api/orders` (optional `customerName`):
 
 ```json
 {
   "items": [
     {"productId": 1, "quantity": 2},
     {"productId": 2, "quantity": 1}
-  ]
+  ],
+  "customerName": "José Putra"
 }
 ```
 
 - JSON only; 1–100 distinct product IDs, integer `productId` from 1 to 2147483647, integer `quantity` from 1 to 999. Duplicates, unknown fields, empty selections and client-supplied prices/totals/status/cashier fields return `400`. Missing/unavailable **new** products return `400`.
+- `customerName` is optional on creation only: omit it, send `null`, or send spaces to store `null`. Otherwise supply a well-formed Unicode string, trimmed to at most100 code points; control characters and line separators return `400`. Stored in nullable `orders.customer_name` (`VARCHAR(100)`) without backfilling names on older orders. Order responses include `customerName: string | null`.
+- Replace complete item selection with `PUT /api/orders/:id` using only `{ "items": [...] }`; it preserves customer name and rejects a `customerName` field. No customer-name editing endpoint is included.
+- `checkoutVersion` covers the captured customer name along with existing reviewed facts. Send the version from the reviewed order when creating a payment; after this upgrade, refresh any previously reviewed order before paying. Exact `requestId` replay remains recoverable without a fresh version.
 - Server generates a cryptographically random 16-character lowercase hexadecimal `orderNumber` (no prefix or hyphens), sets `PENDING`, and attributes order to current authenticated user, including an ADMIN creating an order. CASHIER can access only own orders; foreign or missing order IDs return `404`. ADMIN can read/edit/cancel any order without changing its original owner.
 - Creation requires cafe settings (`id=1`); absent settings return `409`. It snapshots cafe name/address/logo URL, cashier name, product names/prices and enabled tax rules. No migration is automatically deployed or missing settings silently created.
 - Existing lines retain captured names/prices on quantity edits even after catalog rename, repricing or unavailability. Newly selected products capture current available catalog. Omitted products are removed; adding them again in a later request uses current catalog. Order tax/receipt/owner snapshots stay unchanged after edits. Item row IDs may change; use `productId` to identify selection. Identical selection succeeds without changing timestamps/items.
@@ -230,7 +234,7 @@ Create an order with `POST /api/orders` or replace its complete item selection w
 - Cancel using `POST /api/orders/:id/cancel` without body or with `{}` as JSON. PENDING becomes CANCELLED, retaining items/amounts; `completedAt` stays null. Repeated cancellation succeeds unchanged; COMPLETED cancellation returns `409`. No hard deletion, generic status setter or completion endpoint.
 - Lists default to `page=1`, `limit=20`, `status=PENDING`; maximum limit100 and signed-32-bit offset. Status filter accepts `PENDING`, `CANCELLED`, `COMPLETED`, `ALL`; `orderNumber` is exact match, nonempty and at most50 code points. Only ADMIN may supply `cashierId`. Unknown/duplicate/array parameters and malformed percent/UTF-8 query encoding return `400`. Known minor limitation: malformed encoding after a second literal `?` in the query can bypass raw encoding validation and become replacement text. Sort newest `createdAt` first, then descending ID. List rows include `_count.items`; detail includes items ordered by item ID. List count/rows share one consistent read; different pages are not frozen together.
 - Mutations recheck live role/session/account state under actor/order locks. Concurrent edit/cancel is serialized; concurrent full edits use last committed selection, not merge/version checks. Deadlock/write conflict returns `409`. No durable create-idempotency key: do not blindly retry POST after an uncertain response because duplicate orders are possible.
-- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. Payments complete orders through checkout below; PDF receipts use captured text without fetching logos. No stock reservation or customer/table fields.
+- Receipt logo snapshot stores URL, not retained image bytes. Replacing/deleting cafe images may remove old files; historical image rendering is not promised. Payments complete orders through checkout below; PDF receipts use captured text without fetching logos. No stock reservation, customer records or table fields; only the optional customer-name snapshot is stored.
 
 Example create response with captured unit price `12.50`, quantity2 and exclusive10% tax (IDs and timestamps omitted here):
 
@@ -238,7 +242,8 @@ Example create response with captured unit price `12.50`, quantity2 and exclusiv
 {
   "message": "Order created successfully",
   "order": {
-    "orderNumber": "OC-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "orderNumber": "0123456789abcdef",
+    "customerName": "José Putra",
     "status": "PENDING",
     "cashierId": 7,
     "subtotalAmount": "25.00",
@@ -276,7 +281,7 @@ Create QRIS payment:
 {"requestId":"123e4567-e89b-42d3-a456-426614174001","method":"QRIS"}
 ```
 
-- Both use `POST /api/orders/:id/payments`, JSON only, exact field allowlists. `requestId` is a canonical lowercase UUID. Same order/key and normalized method/tender returns existing attempt without redispatch; different fields with same key return `409`. Use a new key only after a verified terminal failure permits a new attempt. Never retry an uncertain charge under a new key.
+- Both use `POST /api/orders/:id/payments`, JSON only, exact field allowlists. `requestId` is a canonical lowercase UUID. Same order/key and normalized method/tender returns existing attempt without redispatch; different fields with same key return `409`. Use a new key only after a verified terminal failure leaves the order PENDING and permits a new attempt; verified expiry normally cancels the order instead. Never retry an uncertain charge under a new key.
 - CASHIER accesses own orders; ADMIN accesses any. Missing/foreign resources return `404`. Live account/session/role and password-change state are rechecked after acquiring order lock and before protected payment disclosure. Provider results persist even if initiating employee loses access during transport.
 - Checkout uses captured item/tax snapshots, not current catalog prices or availability. Payment `orderTotalAmount` retains exact order total; `amount` is payable whole rupiah, rounded half up; signed `roundingAdjustment = amount - orderTotalAmount`. Order totals/items remain unchanged. Example: `12.49` becomes `12.00` with `-0.49`; `12.50` becomes `13.00` with `0.50`.
 - Monetary responses use fixed two-decimal strings. `cashReceived` accepts plain decimal string or JSON number, 0–9999999999.99 with at most two decimals. Raw numeric exponent/excess precision is rejected before Number rounding. Tender must cover payable; exact change is `cashReceived - amount`. CASH accepts zero payable and marks payment `PAID`, order `COMPLETED`, `paidAt` and `completedAt` in one transaction. Rounded payable overflow returns `400`.
@@ -284,7 +289,7 @@ Create QRIS payment:
 - `GET /api/orders/:id/payments` returns all attempts ordered by `attemptNumber`, with request ID, method/status, amounts, cash/change, QR details, provider IDs, timestamps and safe reconciliation reason. No provider request occurs. Legacy new snapshot fields remain null; history is never reconstructed from current catalog.
 - `POST /api/orders/:id/payments/:paymentId/reconcile` accepts no fields, requires QRIS and fetches authoritative provider status. Pending returns `202`; verified terminal state `200`; conflict `409` only after evidence/hold commits. Transport failure returns `502`; configuration or recognized lock contention may return `503`. Reconciliation does not charge again. No public generic status setter exists.
 - Notification signature is SHA512 of original `order_id + status_code + gross_amount + SignatureSecretKey`, compared timing-safely. A valid signature does not authenticate supplied transaction status: handler independently retrieves current provider status and compares QRIS method, IDR currency, amount and transaction identity before changing money state. Duplicate notifications requery; stale failure cannot regress PAID. Notifications return `400` malformed, `403` bad signature, `404` unknown signed order, `503` transient provider/DB failure, or `200` after processing, including durably recorded financial conflicts.
-- Settlement completes an eligible pending order atomically. Verified expiry maps to EXPIRED; deny/cancel to FAILED, only when fresh lookup began after dispatch finished locally. Local clock expiry, provider not-found and transport failure never release an unresolved attempt. Late settlement after terminal failure/replacement, invalid financial identity, provider transaction-ID collision, unsupported refund/status or fraud review retains bounded financial evidence and places order on reconciliation hold. Previous successful payment is never overwritten.
+- Settlement completes an eligible pending order atomically. Verified expiry maps to EXPIRED; deny/cancel to FAILED, only when fresh lookup began after dispatch finished locally. A verified expired latest QRIS attempt also atomically changes its PENDING order to CANCELLED, provided its financial snapshots match and no other pending/paid attempt, newer attempt, reconciliation reason or legacy history blocks cancellation. PAID payments and COMPLETED orders never regress. Cancelled orders reject new payment attempts; create a new order instead. Existing EXPIRED attempts with still-PENDING eligible orders follow this rule only on the next verified expire lookup; no historical bulk update occurs. Local clock expiry, provider not-found and transport failure never release an unresolved attempt. No expiry polling or local timer is added: cancellation runs through existing signed-webhook status verification and protected reconciliation, including charge-followup status lookup. Late settlement after expiry/cancellation or terminal failure/replacement, invalid financial identity, provider transaction-ID collision, unsupported refund/status or fraud review retains bounded financial evidence and places order on reconciliation hold. Previous successful payment is never overwritten.
 - Pending/paid attempts and `paymentHoldReason` block additional checkout, edits and cancellation. Legacy attempts lacking immutable snapshots also block changes, exposing `LEGACY_PAYMENT_REQUIRES_RECONCILIATION` through payment-history projection. Incoherent stored snapshots require operator investigation, not fabricated backfill. Forward migration adds nullable fields and replay uniqueness without rewriting old financial values.
 
 **Availability restriction:** A crash after dispatch claim but before durable dispatch completion can leave that order blocked indefinitely, even if provider later reports not found or a terminal failure. There is no force-clear, resend, worker, refund or supported recovery operation in this scope. Do not manually clear holds or create replacement payments without a separately reviewed recovery procedure.
@@ -529,6 +534,7 @@ A single record is managed at ID `1`; there is no ID path parameter. Creating it
 | `taxRate` | Optional; `10.00` | Number or decimal string from 0 to 100, at most two decimal places |
 | `taxInclusive` | Optional; `false` | JSON boolean |
 | `receiptPaperSize` | Optional; `58mm` | Exactly `58mm` or `80mm`; string in JSON or multipart |
+| `socialMedia` | Optional; `null` | Handle, label or URL as plain single-line text; trimmed, max200 Unicode code points; blank/null clears, omitted update preserves; JSON or multipart text |
 
 Example creation (`POST /api/cafe`):
 
@@ -543,7 +549,7 @@ Example creation (`POST /api/cafe`):
 }
 ```
 
-Settings responses contain the fields above plus `id`, `createdAt`, and `updatedAt`. Prisma Decimal values such as `taxRate` serialize as strings; timestamps serialize as ISO date-time strings. `GET /api/cafe` returns that object directly, while create/update wrap it in `cafeSetting`.
+Settings responses contain the fields above plus `id`, `createdAt`, and `updatedAt`. `socialMedia` is `string|null`; wrong types, malformed Unicode, controls and U+2028/U+2029 return `400`. Public `/api/cafe/branding` remains name/logo only. New orders capture `receiptSocialMedia`, expose it in order responses and include it in `checkoutVersion`; later settings changes do not alter historical order snapshots. Migration `202611280002_cafe_social_media` adds nullable `cafe_settings.social_media` and `orders.receipt_social_media` without backfilling old orders. Prisma Decimal values such as `taxRate` serialize as strings; timestamps serialize as ISO date-time strings. `GET /api/cafe` returns that object directly, while create/update wrap it in `cafeSetting`.
 
 ### Errors
 

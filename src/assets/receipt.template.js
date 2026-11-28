@@ -67,6 +67,7 @@ export const renderReceipt = async (data, paperSize, receiptUrl) => {
     const logo=await receiptLogo(data.logoUrl);
     fields.push({value:data.cafeName,align:'center',heading:true});add(data.address,'center');fields.push({separator:true});
     pair('Ordered',localTime(data.createdAt));pair('Paid',`${localTime(data.payment.paidAt)} WIB`);pair('Cashier',data.cashierName);
+    if(data.customerName)pair('Customer',data.customerName);
     fields.push({separator:true});
     for(const item of data.items){add(item.productName);pair(`${item.quantity} x IDR ${item.unitPrice}`,`IDR ${item.subtotal}`);await setImmediate();}
     fields.push({separator:true});
@@ -81,14 +82,23 @@ export const renderReceipt = async (data, paperSize, receiptUrl) => {
       if(field.separator)rows.push({separator:true});
       else if(field.label===undefined)for(const text of await wrap(field.value,contentWidth))rows.push({text,align:field.align,heading:field.heading});
       else {
-        const leftWidth=Math.min(doc.widthOfString(field.label),contentWidth-Math.min(doc.widthOfString(field.value),contentWidth*0.7)-6),rightWidth=contentWidth-leftWidth-6;
+        const leftWidth=field.label==='Customer'?doc.widthOfString(field.label):Math.min(doc.widthOfString(field.label),contentWidth-Math.min(doc.widthOfString(field.value),contentWidth*0.7)-6),rightWidth=contentWidth-leftWidth-6;
         const left=await wrap(field.label,leftWidth),right=await wrap(field.value,rightWidth);
         for(let i=0;i<Math.max(left.length,right.length);i++)rows.push({text:left[i]||'',right:right[i]||'',leftWidth,rightWidth});
       }
       if(rows.length>12000)throw receiptError();
     }
-    const qr=receiptQr(receiptUrl), qrSize=(qr.size+8)*0.6*mm, footer=qrSize+8;
+    doc.font(font).fontSize(8);
     const lineHeight=12,maxHeight=14000,headingExtra=rows.filter(row=>row.heading).length*4;
+    const socialLines=[];
+    for(const text of data.socialMedia?await wrap(data.socialMedia,contentWidth):[]){
+      // Positioned combining marks can extend beyond font ascent/descent and extracted text boxes.
+      const {glyphs,positions}=doc._font.layout(text),scale=8/1000;
+      const top=Math.max(0,...glyphs.map((g,i)=>(g.bbox.maxY*doc._font.scale+positions[i].yOffset-doc._font.ascender)*scale));
+      const bottom=Math.max(lineHeight,...glyphs.map((g,i)=>(doc._font.ascender-g.bbox.minY*doc._font.scale-positions[i].yOffset)*scale));
+      socialLines.push({text,top,height:top+bottom});
+    }
+    const qr=receiptQr(receiptUrl), qrSize=(qr.size+8)*0.6*mm, footer=qrSize+8+(socialLines.length?4+socialLines.reduce((sum,line)=>sum+line.height,0):0);
     const maxRows=Math.floor((maxHeight-2*margin-footer-(logo?46:0)-headingExtra)/lineHeight);
     const pages=Math.ceil(rows.length/maxRows);
     if(pages>16)throw receiptError();
@@ -112,6 +122,8 @@ export const renderReceipt = async (data, paperSize, receiptUrl) => {
         doc.fillColor('black');
         for(let r=0;r<qr.size;r++)for(let c=0;c<qr.size;c++)if(qr.get(r,c))doc.rect(x+(c+4)*cell,y+(r+4)*cell,cell,cell).fill();
         doc.link(x,y,qrSize,qrSize,receiptUrl);
+        y+=qrSize+4;doc.font(font).fontSize(8);
+        for(const line of socialLines){doc.text(line.text,margin,y+line.top,{width:contentWidth,align:'center',lineBreak:false});y+=line.height;}
       }
       await setImmediate();
     }

@@ -35,7 +35,7 @@ const newLines = async(tx,selection,existing=[])=>{
   return lines;
 };
 export const createOrder = async(req,res)=>{
-  const {data,error}=validateOrder(req.body);
+  const {data,error}=validateOrder(req.body,{creation:true});
   if (error) return res.status(400).json({message:error});
   try {
     const order=await withActor(req,async(tx,user)=>{
@@ -43,8 +43,8 @@ export const createOrder = async(req,res)=>{
       const cafe=await tx.cafeSetting.findUnique({where:{id:1}});
       if (!cafe) throw orderError('Cafe settings required before taking orders',409);
       const tax=cafe.taxEnabled?{taxName:cafe.taxName,taxRate:cafe.taxRate,taxInclusive:cafe.taxInclusive}:{taxName:null,taxRate:'0.00',taxInclusive:false};
-      const {items,...amounts}=calculateOrder(await newLines(tx,data),tax);
-      return tx.order.create({data:{orderNumber:randomBytes(8).toString('hex'),status:'PENDING',cashierId:user.id,receiptCashierName:user.name,receiptCafeName:cafe.name,receiptCafeAddress:cafe.address,receiptLogoUrl:cafe.logoUrl,receiptPaperSize:cafe.receiptPaperSize,...tax,...amounts,items:{create:items}},include});
+      const {items,...amounts}=calculateOrder(await newLines(tx,data.items),tax);
+      return tx.order.create({data:{orderNumber:randomBytes(8).toString('hex'),customerName:data.customerName,status:'PENDING',cashierId:user.id,receiptCashierName:user.name,receiptCafeName:cafe.name,receiptSocialMedia:cafe.socialMedia??null,receiptCafeAddress:cafe.address,receiptLogoUrl:cafe.logoUrl,receiptPaperSize:cafe.receiptPaperSize,...tax,...amounts,items:{create:items}},include});
     });
     return res.status(201).json({message:'Order created successfully',order:serializeOrder(order)});
   } catch(error) { return handleOrderError(res,error); }

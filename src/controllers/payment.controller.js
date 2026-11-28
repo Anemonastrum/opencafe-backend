@@ -108,7 +108,13 @@ const applyProviderObservation = (paymentId, observation, dispatchFinishedBefore
           catch { reason = 'PROVIDER_AMOUNT_MISMATCH'; }
         }
         if (!payment.requestId || payment.orderTotalAmount === null || payment.roundingAdjustment === null || !payment.dispatchClaimedAt) reason ||= 'LEGACY_PAYMENT_REQUIRES_RECONCILIATION';
-        if (!reason && payment.status === 'PENDING') {
+        const canCancelExpiredOrder = !reason && observation.transaction_status === 'expire' && payment.method === 'QRIS'
+          && ['PENDING', 'EXPIRED'].includes(payment.status) && order.status === 'PENDING'
+          && !order.paymentHoldReason && !payment.reconciliationReason && dispatchFinishedBeforeLookup && payment.dispatchFinishedAt
+          && !await tx.payment.count({ where: { orderId: order.id, id: { not: paymentId }, OR: [
+            { attemptNumber: { gt: payment.attemptNumber } }, { status: { in: ['PENDING', 'PAID'] } }, { reconciliationReason: { not: null } }
+          ] } }) && !await legacyPaymentHold(tx, order.id);
+        if (!reason && (payment.status === 'PENDING' || canCancelExpiredOrder)) {
           try {
             validateOrderSnapshot(order);
             const expected = paymentAmounts(order.totalAmount);
@@ -129,6 +135,7 @@ const applyProviderObservation = (paymentId, observation, dispatchFinishedBefore
           }
         }
         if (!reason && payment.status === 'PENDING' && !order.paymentHoldReason && !payment.reconciliationReason && dispatchFinishedBeforeLookup && payment.dispatchFinishedAt && ['expire', 'deny', 'cancel'].includes(observation.transaction_status)) patch.status = observation.transaction_status === 'expire' ? 'EXPIRED' : 'FAILED';
+        if (!reason && canCancelExpiredOrder) await tx.order.update({ where: { id: order.id }, data: { status: 'CANCELLED' } });
         if (reason) {
           patch.reconciliationReason = payment.reconciliationReason || reason;
           for (const id of orderIds) {
